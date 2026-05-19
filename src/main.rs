@@ -36,6 +36,8 @@ fn main() {
             // Enter shell mode if no command specified or explicit shell command
             shell::run()
         }
+
+        Some(Commands::Serve { port }) => commands::serve::execute(port),
     };
 
     if let Err(e) = result {

@@ -62,8 +62,13 @@ pub fn run() -> Result<()> {
                 continue;
             }
             Err(ReadlineError::Eof) => {
-                println!("Goodbye!");
-                break;
+                if current_card.is_some() {
+                    current_card = None;
+                    println!("Left card context");
+                } else {
+                    println!("Goodbye!");
+                    break;
+                }
             }
             Err(err) => {
                 eprintln!("Error: {:?}", err);

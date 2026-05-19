@@ -80,4 +80,11 @@ pub enum Commands {
 
     /// Enter interactive shell mode
     Shell,
+
+    /// Start a web server rendering the kanban board
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
+    },
 }
