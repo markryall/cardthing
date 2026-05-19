@@ -1,4 +1,5 @@
 use crate::commands;
+use crate::models::Config;
 use crate::storage;
 use anyhow::{bail, Result};
 use colored::Colorize;
@@ -158,7 +159,12 @@ fn handle_cd(args: &[&str], current_card: &mut Option<String>) -> Result<()> {
 
     // Show card details
     let card = storage::load_card(card_name)?;
-    println!("  Status: {}", card.status.to_string().color(card.status.color()));
+    let config = Config::load();
+    let status_color = config
+        .find_status(&card.status)
+        .map(|s| s.terminal_color())
+        .unwrap_or(colored::Color::White);
+    println!("  Status: {}", card.status.color(status_color));
     println!("  Owner: {}", card.owner.as_deref().unwrap_or("-"));
     println!("  Description: {}", card.description);
     if !card.tags.is_empty() {

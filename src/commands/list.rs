@@ -1,4 +1,4 @@
-use crate::models::{Card, Status};
+use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::Result;
 use colored::Colorize;
@@ -9,11 +9,11 @@ pub fn execute(
     tag_filter: Option<String>,
     format: String,
 ) -> Result<()> {
+    let config = Config::load();
     let mut cards = storage::list_cards()?;
 
-    // Apply filters
     if let Some(status) = status_filter {
-        let status = Status::from_str(&status)?;
+        let status = config.validate_status(&status)?;
         cards.retain(|c| c.status == status);
     }
 
@@ -25,25 +25,22 @@ pub fn execute(
         cards.retain(|c| c.tags.contains(&tag));
     }
 
-    // Sort by creation date
     cards.sort_by_key(|c| c.created_at);
 
-    // Output
     match format.as_str() {
         "json" => print_json(&cards)?,
-        "table" | _ => print_table(&cards)?,
+        _ => print_table(&cards, &config)?,
     }
 
     Ok(())
 }
 
-fn print_table(cards: &[Card]) -> Result<()> {
+fn print_table(cards: &[Card], config: &Config) -> Result<()> {
     if cards.is_empty() {
         println!("No cards found.");
         return Ok(());
     }
 
-    // Print header
     println!(
         "{:<20} {:<12} {:<15} {:<40}",
         "NAME".bold(),
@@ -53,10 +50,12 @@ fn print_table(cards: &[Card]) -> Result<()> {
     );
     println!("{}", "=".repeat(90));
 
-    // Print cards
     for card in cards {
-        let status_str = format!("{}", card.status);
-        let status_colored = status_str.color(card.status.color());
+        let color = config
+            .find_status(&card.status)
+            .map(|s| s.terminal_color())
+            .unwrap_or(colored::Color::White);
+        let status_colored = card.status.color(color);
         let owner = card.owner.as_deref().unwrap_or("-");
         let desc = truncate(&card.description, 40);
 

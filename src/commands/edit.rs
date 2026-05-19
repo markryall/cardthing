@@ -1,4 +1,4 @@
-use crate::models::Status;
+use crate::models::Config;
 use crate::storage;
 use anyhow::{bail, Result};
 use chrono::Utc;
@@ -12,25 +12,21 @@ pub fn execute(
     add_tags: Vec<String>,
     remove_tags: Vec<String>,
 ) -> Result<()> {
-    // Load existing card
     let mut card = storage::load_card(&name)?;
-
     let mut changes = Vec::new();
 
-    // Update description if provided
     if let Some(desc) = description {
         card.description = desc.clone();
         changes.push(format!("description to '{}'", desc));
     }
 
-    // Update status if provided
     if let Some(status_str) = status {
-        let new_status = Status::from_str(&status_str)?;
-        card.status = new_status;
+        let config = Config::load();
+        let new_status = config.validate_status(&status_str)?;
+        card.status = new_status.clone();
         changes.push(format!("status to '{}'", new_status));
     }
 
-    // Update owner if provided
     if let Some(owner_value) = owner {
         if owner_value.is_empty() || owner_value == "-" {
             card.owner = None;
@@ -41,7 +37,6 @@ pub fn execute(
         }
     }
 
-    // Add tags
     for tag in add_tags {
         if !card.tags.contains(&tag) {
             card.tags.push(tag.clone());
@@ -49,7 +44,6 @@ pub fn execute(
         }
     }
 
-    // Remove tags
     for tag in &remove_tags {
         if let Some(pos) = card.tags.iter().position(|t| t == tag) {
             card.tags.remove(pos);
@@ -57,18 +51,12 @@ pub fn execute(
         }
     }
 
-    // Check if any changes were made
     if changes.is_empty() {
         bail!("No changes specified");
     }
 
-    // Update timestamp
     card.updated_at = Utc::now();
-
-    // Validate
     card.validate()?;
-
-    // Save
     storage::save_card(&card)?;
 
     println!("{} Updated card '{}'", "✓".green(), name.bold());

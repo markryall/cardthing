@@ -1,11 +1,10 @@
 use chrono::{DateTime, Utc};
-use colored::Color;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Card {
     pub name: String,
-    pub status: Status,
+    pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub description: String,
@@ -15,21 +14,12 @@ pub struct Card {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Status {
-    Todo,
-    InProgress,
-    Done,
-    Blocked,
-}
-
 impl Card {
     pub fn new(name: String, description: String) -> Self {
         let now = Utc::now();
         Self {
             name,
-            status: Status::Todo,
+            status: "todo".to_string(),
             owner: None,
             description,
             created_at: now,
@@ -49,42 +39,6 @@ impl Card {
     }
 }
 
-impl Status {
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s.to_lowercase().as_str() {
-            "todo" => Ok(Status::Todo),
-            "inprogress" | "in-progress" | "in_progress" => Ok(Status::InProgress),
-            "done" => Ok(Status::Done),
-            "blocked" => Ok(Status::Blocked),
-            _ => anyhow::bail!("Invalid status: '{}'. Valid values are: todo, inprogress, done, blocked", s),
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Status::Todo => "todo",
-            Status::InProgress => "inprogress",
-            Status::Done => "done",
-            Status::Blocked => "blocked",
-        }
-    }
-
-    pub fn color(&self) -> Color {
-        match self {
-            Status::Todo => Color::Yellow,
-            Status::InProgress => Color::Blue,
-            Status::Done => Color::Green,
-            Status::Blocked => Color::Red,
-        }
-    }
-}
-
-impl std::fmt::Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,7 +48,7 @@ mod tests {
         let card = Card::new("Test Card".to_string(), "Test description".to_string());
         assert_eq!(card.name, "Test Card");
         assert_eq!(card.description, "Test description");
-        assert_eq!(card.status, Status::Todo);
+        assert_eq!(card.status, "todo");
         assert_eq!(card.owner, None);
         assert!(card.tags.is_empty());
     }
@@ -121,42 +75,6 @@ mod tests {
     }
 
     #[test]
-    fn test_status_from_str() {
-        assert_eq!(Status::from_str("todo").unwrap(), Status::Todo);
-        assert_eq!(Status::from_str("TODO").unwrap(), Status::Todo);
-        assert_eq!(Status::from_str("inprogress").unwrap(), Status::InProgress);
-        assert_eq!(Status::from_str("in-progress").unwrap(), Status::InProgress);
-        assert_eq!(Status::from_str("in_progress").unwrap(), Status::InProgress);
-        assert_eq!(Status::from_str("done").unwrap(), Status::Done);
-        assert_eq!(Status::from_str("blocked").unwrap(), Status::Blocked);
-        assert!(Status::from_str("invalid").is_err());
-    }
-
-    #[test]
-    fn test_status_as_str() {
-        assert_eq!(Status::Todo.as_str(), "todo");
-        assert_eq!(Status::InProgress.as_str(), "inprogress");
-        assert_eq!(Status::Done.as_str(), "done");
-        assert_eq!(Status::Blocked.as_str(), "blocked");
-    }
-
-    #[test]
-    fn test_status_display() {
-        assert_eq!(format!("{}", Status::Todo), "todo");
-        assert_eq!(format!("{}", Status::InProgress), "inprogress");
-        assert_eq!(format!("{}", Status::Done), "done");
-        assert_eq!(format!("{}", Status::Blocked), "blocked");
-    }
-
-    #[test]
-    fn test_status_color() {
-        assert_eq!(Status::Todo.color(), Color::Yellow);
-        assert_eq!(Status::InProgress.color(), Color::Blue);
-        assert_eq!(Status::Done.color(), Color::Green);
-        assert_eq!(Status::Blocked.color(), Color::Red);
-    }
-
-    #[test]
     fn test_card_serialization() {
         let card = Card::new("Test".to_string(), "Description".to_string());
         let serialized = toml::to_string(&card).unwrap();
@@ -178,7 +96,7 @@ mod tests {
         "#;
         let card: Card = toml::from_str(toml_str).unwrap();
         assert_eq!(card.name, "Test Card");
-        assert_eq!(card.status, Status::InProgress);
+        assert_eq!(card.status, "inprogress");
         assert_eq!(card.owner, Some("John".to_string()));
         assert_eq!(card.description, "Test description");
         assert_eq!(card.tags, vec!["tag1", "tag2"]);

@@ -1,4 +1,4 @@
-use crate::models::{Card, Status};
+use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::Result;
 use axum::{extract::Path, response::Html, routing::get, Json, Router};
@@ -54,8 +54,9 @@ async fn patch_card_status(
     Json(body): Json<StatusUpdate>,
 ) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
+        let config = Config::load();
         let mut card = storage::load_card(&name)?;
-        card.status = Status::from_str(&body.status)?;
+        card.status = config.validate_status(&body.status)?;
         card.updated_at = Utc::now();
         storage::save_card(&card)?;
         Ok(())
@@ -67,28 +68,14 @@ async fn patch_card_status(
     }
 }
 
-struct Column {
-    status: Status,
-    status_str: &'static str,
-    label: &'static str,
-    color: &'static str,
-}
-
-fn columns() -> [Column; 4] {
-    [
-        Column { status: Status::Todo,       status_str: "todo",       label: "Todo",        color: "#f59e0b" },
-        Column { status: Status::InProgress, status_str: "inprogress", label: "In Progress", color: "#3b82f6" },
-        Column { status: Status::Done,       status_str: "done",       label: "Done",        color: "#10b981" },
-        Column { status: Status::Blocked,    status_str: "blocked",    label: "Blocked",     color: "#ef4444" },
-    ]
-}
-
 fn render_board(cards: &[Card]) -> String {
-    let columns_html: String = columns()
+    let config = Config::load();
+    let columns_html: String = config
+        .statuses
         .iter()
         .map(|col| {
-            let col_cards: Vec<&Card> = cards.iter().filter(|c| c.status == col.status).collect();
-            render_column(col, &col_cards)
+            let col_cards: Vec<&Card> = cards.iter().filter(|c| c.status == col.id).collect();
+            render_column(&col.id, &col.label, &col.color, &col_cards)
         })
         .collect();
 
@@ -166,7 +153,7 @@ fn render_board(cards: &[Card]) -> String {
     )
 }
 
-fn render_column(col: &Column, cards: &[&Card]) -> String {
+fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> String {
     let cards_html: String = if cards.is_empty() {
         "<div class=\"empty\">No cards</div>".to_string()
     } else {
@@ -183,9 +170,9 @@ fn render_column(col: &Column, cards: &[&Card]) -> String {
     {cards}
   </div>
 </div>"#,
-        status = col.status_str,
-        color = col.color,
-        label = col.label,
+        status = escape_html(status_id),
+        color = escape_html(color),
+        label = escape_html(label),
         count = cards.len(),
         cards = cards_html,
     )

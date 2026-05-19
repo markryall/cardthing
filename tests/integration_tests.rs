@@ -1,18 +1,15 @@
-use cardthing::models::{Card, Status};
+use cardthing::models::Card;
 use cardthing::storage;
 use std::env;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-// Global mutex to ensure only one test changes directory at a time
 static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
-/// Helper to set up a temporary directory for testing and return to original after
 fn with_temp_cards_dir<F>(test: F)
 where
     F: FnOnce() + std::panic::UnwindSafe,
 {
-    // Lock to ensure tests don't interfere with each other's directories
     let _guard = TEST_MUTEX.lock().unwrap();
 
     let original_dir = env::current_dir().unwrap();
@@ -32,16 +29,15 @@ where
 #[test]
 fn test_add_card() {
     with_temp_cards_dir(|| {
-        let mut card = Card::new("Test Card".to_string(), "Test description".to_string());
-        card.status = Status::Todo;
+        let card = Card::new("Test Card".to_string(), "Test description".to_string());
         storage::save_card(&card).unwrap();
 
         assert!(storage::card_exists("Test Card"));
 
-        let loaded_card = storage::load_card("Test Card").unwrap();
-        assert_eq!(loaded_card.name, "Test Card");
-        assert_eq!(loaded_card.description, "Test description");
-        assert_eq!(loaded_card.status, Status::Todo);
+        let loaded = storage::load_card("Test Card").unwrap();
+        assert_eq!(loaded.name, "Test Card");
+        assert_eq!(loaded.description, "Test description");
+        assert_eq!(loaded.status, "todo");
     });
 }
 
@@ -49,16 +45,16 @@ fn test_add_card() {
 fn test_add_card_with_owner_and_tags() {
     with_temp_cards_dir(|| {
         let mut card = Card::new("Feature X".to_string(), "Implement feature X".to_string());
-        card.status = Status::InProgress;
+        card.status = "inprogress".to_string();
         card.owner = Some("Alice".to_string());
         card.tags = vec!["feature".to_string(), "high-priority".to_string()];
 
         storage::save_card(&card).unwrap();
 
-        let loaded_card = storage::load_card("Feature X").unwrap();
-        assert_eq!(loaded_card.owner, Some("Alice".to_string()));
-        assert_eq!(loaded_card.status, Status::InProgress);
-        assert_eq!(loaded_card.tags, vec!["feature", "high-priority"]);
+        let loaded = storage::load_card("Feature X").unwrap();
+        assert_eq!(loaded.owner, Some("Alice".to_string()));
+        assert_eq!(loaded.status, "inprogress");
+        assert_eq!(loaded.tags, vec!["feature", "high-priority"]);
     });
 }
 
@@ -69,12 +65,12 @@ fn test_list_cards() {
         storage::save_card(&card1).unwrap();
 
         let mut card2 = Card::new("Card 2".to_string(), "Second card".to_string());
-        card2.status = Status::InProgress;
+        card2.status = "inprogress".to_string();
         card2.owner = Some("Alice".to_string());
         storage::save_card(&card2).unwrap();
 
         let mut card3 = Card::new("Card 3".to_string(), "Third card".to_string());
-        card3.status = Status::Done;
+        card3.status = "done".to_string();
         storage::save_card(&card3).unwrap();
 
         let cards = storage::list_cards().unwrap();
@@ -111,7 +107,7 @@ fn test_storage_delete_card() {
 fn test_card_persistence() {
     with_temp_cards_dir(|| {
         let mut card = Card::new("Persist".to_string(), "Test persistence".to_string());
-        card.status = Status::InProgress;
+        card.status = "inprogress".to_string();
         card.owner = Some("Bob".to_string());
         card.tags = vec!["tag1".to_string(), "tag2".to_string()];
 
@@ -131,10 +127,7 @@ fn test_load_nonexistent_card() {
     with_temp_cards_dir(|| {
         let result = storage::load_card("Nonexistent");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Card not found"));
+        assert!(result.unwrap_err().to_string().contains("Card not found"));
     });
 }
 
@@ -149,7 +142,6 @@ fn test_delete_nonexistent_card() {
 #[test]
 fn test_filename_sanitization() {
     with_temp_cards_dir(|| {
-        // Test that cards with special characters in names are saved correctly
         let card1 = Card::new("My Special Card!".to_string(), "Description".to_string());
         storage::save_card(&card1).unwrap();
         assert!(storage::card_exists("My Special Card!"));
@@ -166,13 +158,9 @@ fn test_filename_sanitization() {
 #[test]
 fn test_multiple_cards_same_prefix() {
     with_temp_cards_dir(|| {
-        let card1 = Card::new("Task".to_string(), "First task".to_string());
-        let card2 = Card::new("Task-2".to_string(), "Second task".to_string());
-        let card3 = Card::new("Task_3".to_string(), "Third task".to_string());
-
-        storage::save_card(&card1).unwrap();
-        storage::save_card(&card2).unwrap();
-        storage::save_card(&card3).unwrap();
+        storage::save_card(&Card::new("Task".to_string(), "First task".to_string())).unwrap();
+        storage::save_card(&Card::new("Task-2".to_string(), "Second task".to_string())).unwrap();
+        storage::save_card(&Card::new("Task_3".to_string(), "Third task".to_string())).unwrap();
 
         assert!(storage::card_exists("Task"));
         assert!(storage::card_exists("Task-2"));
@@ -191,18 +179,16 @@ fn test_card_update() {
 
         let created_at = card.created_at;
 
-        // Wait a bit to ensure timestamp difference
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        // Update the card
         card.description = "Updated".to_string();
-        card.status = Status::Done;
+        card.status = "done".to_string();
         card.updated_at = chrono::Utc::now();
         storage::save_card(&card).unwrap();
 
         let loaded = storage::load_card("Update Test").unwrap();
         assert_eq!(loaded.description, "Updated");
-        assert_eq!(loaded.status, Status::Done);
+        assert_eq!(loaded.status, "done");
         assert_eq!(loaded.created_at, created_at);
         assert!(loaded.updated_at > created_at);
     });
@@ -217,32 +203,21 @@ fn test_empty_cards_directory() {
 }
 
 #[test]
-fn test_status_enum_all_values() {
+fn test_all_status_values() {
     with_temp_cards_dir(|| {
-        let mut card1 = Card::new("Todo".to_string(), "Todo card".to_string());
-        card1.status = Status::Todo;
-        storage::save_card(&card1).unwrap();
-
-        let mut card2 = Card::new("InProgress".to_string(), "In progress card".to_string());
-        card2.status = Status::InProgress;
-        storage::save_card(&card2).unwrap();
-
-        let mut card3 = Card::new("Done".to_string(), "Done card".to_string());
-        card3.status = Status::Done;
-        storage::save_card(&card3).unwrap();
-
-        let mut card4 = Card::new("Blocked".to_string(), "Blocked card".to_string());
-        card4.status = Status::Blocked;
-        storage::save_card(&card4).unwrap();
+        for status in &["todo", "inprogress", "done", "blocked"] {
+            let mut card = Card::new(status.to_string(), format!("{} card", status));
+            card.status = status.to_string();
+            storage::save_card(&card).unwrap();
+        }
 
         let cards = storage::list_cards().unwrap();
         assert_eq!(cards.len(), 4);
 
-        // Verify all statuses are loaded correctly
-        let statuses: Vec<Status> = cards.iter().map(|c| c.status).collect();
-        assert!(statuses.contains(&Status::Todo));
-        assert!(statuses.contains(&Status::InProgress));
-        assert!(statuses.contains(&Status::Done));
-        assert!(statuses.contains(&Status::Blocked));
+        let statuses: Vec<&str> = cards.iter().map(|c| c.status.as_str()).collect();
+        assert!(statuses.contains(&"todo"));
+        assert!(statuses.contains(&"inprogress"));
+        assert!(statuses.contains(&"done"));
+        assert!(statuses.contains(&"blocked"));
     });
 }
