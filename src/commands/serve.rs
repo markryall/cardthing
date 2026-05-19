@@ -287,6 +287,18 @@ fn render_board(cards: &[Card]) -> String {
   .empty {{ font-size: 0.775rem; color: #475569; text-align: center; padding: 1.5rem 0; }}
   .sortable-ghost {{ opacity: 0.3; }}
   .sortable-drag {{ opacity: 0.9; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }}
+  /* Keyboard focus */
+  .card.focused {{ border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.25); }}
+  /* Shortcuts panel */
+  .shortcuts-panel {{ display: none; position: fixed; bottom: 1.5rem; right: 1.5rem; background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem 1.25rem; z-index: 50; min-width: 220px; }}
+  .shortcuts-panel.open {{ display: block; }}
+  .shortcuts-panel h3 {{ font-size: 0.75rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.625rem; }}
+  .shortcuts-panel table {{ border-collapse: collapse; width: 100%; }}
+  .shortcuts-panel td {{ font-size: 0.775rem; padding: 0.15rem 0; color: #94a3b8; }}
+  .shortcuts-panel td:first-child {{ padding-right: 1rem; white-space: nowrap; }}
+  kbd {{ background: #0f172a; border: 1px solid #334155; border-radius: 0.25rem; font-size: 0.7rem; padding: 0.1rem 0.35rem; color: #cbd5e1; font-family: inherit; }}
+  .btn-help {{ position: fixed; bottom: 1.5rem; right: 1.5rem; background: #1e293b; border: 1px solid #334155; border-radius: 999px; color: #64748b; cursor: pointer; font-size: 0.8rem; width: 2rem; height: 2rem; display: flex; align-items: center; justify-content: center; z-index: 49; }}
+  .btn-help:hover {{ color: #f1f5f9; border-color: #64748b; }}
   /* Checklist progress on card */
   .checklist-progress {{ font-size: 0.7rem; color: #64748b; margin-top: 0.5rem; display: flex; align-items: center; gap: 0.375rem; }}
   .progress-bar {{ flex: 1; height: 3px; background: #1e293b; border-radius: 999px; overflow: hidden; }}
@@ -374,6 +386,27 @@ fn render_board(cards: &[Card]) -> String {
   </div>
 </div>
 
+<div class="shortcuts-panel" id="shortcuts-panel">
+  <h3>Board</h3>
+  <table>
+    <tr><td><kbd>n</kbd></td><td>New card</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>Edit focused card</td></tr>
+    <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move focus up / down</td></tr>
+    <tr><td><kbd>h</kbd> <kbd>l</kbd></td><td>Move focus left / right</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Move card left / right</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Deselect / close</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Toggle this panel</td></tr>
+  </table>
+  <h3 style="margin-top:0.75rem">Checklist (in modal)</h3>
+  <table>
+    <tr><td><kbd>Enter</kbd></td><td>New item below</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Move between items</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Toggle checked</td></tr>
+    <tr><td><kbd>⌫</kbd> on empty</td><td>Delete item</td></tr>
+  </table>
+</div>
+<button class="btn-help" id="btn-help" onclick="toggleHelp()" title="Keyboard shortcuts">?</button>
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script>
   const DEFAULT_STATUS = '{default_status}';
@@ -424,7 +457,7 @@ fn render_board(cards: &[Card]) -> String {
   }});
 
   // ── Checklist modal helpers ───────────────────────────────────────────────
-  function addChecklistRow(text = '', checked = false) {{
+  function addChecklistRow(text = '', checked = false, afterRow = null) {{
     const container = document.getElementById('cl-items');
     const row = document.createElement('div');
     row.className = 'cl-row';
@@ -433,8 +466,36 @@ fn render_board(cards: &[Card]) -> String {
       <input type="text" value="${{escapeAttr(text)}}" placeholder="Item text">
       <button class="cl-del" onclick="this.closest('.cl-row').remove()" title="Remove">&#x2715;</button>
     `;
-    container.appendChild(row);
-    row.querySelector('input[type=text]').focus();
+    const textInput = row.querySelector('input[type=text]');
+    textInput.addEventListener('keydown', e => {{
+      const rows = Array.from(container.querySelectorAll('.cl-row'));
+      const idx = rows.indexOf(row);
+      if (e.key === 'Enter') {{
+        e.preventDefault();
+        addChecklistRow('', false, row);
+      }} else if (e.key === 'Backspace' && textInput.value === '') {{
+        e.preventDefault();
+        row.remove();
+        const prev = rows[idx - 1];
+        if (prev) prev.querySelector('input[type=text]').focus();
+      }} else if (e.key === ' ' && e.ctrlKey) {{
+        e.preventDefault();
+        const cb = row.querySelector('input[type=checkbox]');
+        cb.checked = !cb.checked;
+      }} else if (e.key === 'ArrowUp' && idx > 0) {{
+        e.preventDefault();
+        rows[idx - 1].querySelector('input[type=text]').focus();
+      }} else if (e.key === 'ArrowDown' && idx < rows.length - 1) {{
+        e.preventDefault();
+        rows[idx + 1].querySelector('input[type=text]').focus();
+      }}
+    }});
+    if (afterRow && afterRow.nextSibling) {{
+      container.insertBefore(row, afterRow.nextSibling);
+    }} else {{
+      container.appendChild(row);
+    }}
+    textInput.focus();
   }}
 
   function escapeAttr(s) {{
@@ -540,11 +601,136 @@ fn render_board(cards: &[Card]) -> String {
     }}
   }}
 
+  // ── Keyboard navigation ──────────────────────────────────────────────────
+  let focusedCard = null;
+
+  function focusCard(card) {{
+    if (focusedCard) focusedCard.classList.remove('focused');
+    focusedCard = card;
+    if (card) {{
+      card.classList.add('focused');
+      card.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }});
+    }}
+  }}
+
+  function getColumns() {{
+    return Array.from(document.querySelectorAll('.column'));
+  }}
+
+  function getCardsInColumn(col) {{
+    return Array.from(col.querySelectorAll('.card'));
+  }}
+
+  function moveFocus(dir) {{
+    const columns = getColumns();
+    if (!columns.length) return;
+    if (!focusedCard) {{
+      const first = columns[0].querySelector('.card');
+      if (first) focusCard(first);
+      return;
+    }}
+    const col = focusedCard.closest('.column');
+    const colIdx = columns.indexOf(col);
+    const cards = getCardsInColumn(col);
+    const cardIdx = cards.indexOf(focusedCard);
+    if (dir === 'down') {{
+      const next = cards[cardIdx + 1];
+      if (next) focusCard(next);
+    }} else if (dir === 'up') {{
+      const prev = cards[cardIdx - 1];
+      if (prev) focusCard(prev);
+    }} else if (dir === 'left' && colIdx > 0) {{
+      const prevCards = getCardsInColumn(columns[colIdx - 1]);
+      const target = prevCards[Math.min(cardIdx, prevCards.length - 1)];
+      if (target) focusCard(target);
+    }} else if (dir === 'right' && colIdx < columns.length - 1) {{
+      const nextCards = getCardsInColumn(columns[colIdx + 1]);
+      const target = nextCards[Math.min(cardIdx, nextCards.length - 1)];
+      if (target) focusCard(target);
+    }}
+  }}
+
+  function moveCardToAdjacentColumn(offset) {{
+    if (!focusedCard) return;
+    const columns = getColumns();
+    const col = focusedCard.closest('.column');
+    const colIdx = columns.indexOf(col);
+    const targetIdx = colIdx + offset;
+    if (targetIdx < 0 || targetIdx >= columns.length) return;
+    const targetCol = columns[targetIdx];
+    const status = targetCol.dataset.status;
+    const name = focusedCard.dataset.name;
+    fetch(`/cards/${{encodeURIComponent(name)}}/status`, {{
+      method: 'PATCH',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ status }}),
+    }})
+      .then(r => r.json())
+      .then(data => {{
+        if (data.ok) {{
+          focusedCard.dataset.status = status;
+          targetCol.querySelector('.column-cards').appendChild(focusedCard);
+          updateColumnCounts();
+        }} else {{
+          location.reload();
+        }}
+      }})
+      .catch(() => location.reload());
+  }}
+
+  function updateColumnCounts() {{
+    document.querySelectorAll('.column').forEach(col => {{
+      const cards = getCardsInColumn(col);
+      col.querySelector('.column-count').textContent = cards.length;
+      const cardsEl = col.querySelector('.column-cards');
+      const empty = cardsEl.querySelector('.empty');
+      if (cards.length === 0 && !empty) {{
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = 'No cards';
+        cardsEl.appendChild(div);
+      }} else if (cards.length > 0 && empty) {{
+        empty.remove();
+      }}
+    }});
+  }}
+
+  function toggleHelp() {{
+    const panel = document.getElementById('shortcuts-panel');
+    const btn = document.getElementById('btn-help');
+    const open = panel.classList.toggle('open');
+    btn.style.display = open ? 'none' : '';
+  }}
+
   document.addEventListener('keydown', e => {{
-    if (e.key === 'Escape') closeModal();
-    if (e.key === 'Enter' && e.metaKey &&
-        document.getElementById('backdrop').classList.contains('open')) {{
-      submitModal();
+    const inInput = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
+    const modalOpen = document.getElementById('backdrop').classList.contains('open');
+
+    // Modal shortcuts
+    if (modalOpen) {{
+      if (e.key === 'Escape') {{ e.preventDefault(); closeModal(); }}
+      if (e.key === 'Enter' && e.metaKey) {{ e.preventDefault(); submitModal(); }}
+      return;
+    }}
+
+    // Board shortcuts (ignore when typing in inputs)
+    if (inInput) return;
+
+    switch (e.key) {{
+      case 'n': e.preventDefault(); openCreate(); break;
+      case 'j': case 'ArrowDown':  e.preventDefault(); moveFocus('down');  break;
+      case 'k': case 'ArrowUp':    e.preventDefault(); moveFocus('up');    break;
+      case 'h': case 'ArrowLeft':  e.preventDefault(); moveFocus('left');  break;
+      case 'l': case 'ArrowRight': e.preventDefault(); moveFocus('right'); break;
+      case 'Enter': if (focusedCard) {{ e.preventDefault(); openEdit(focusedCard); }} break;
+      case '[': e.preventDefault(); moveCardToAdjacentColumn(-1); break;
+      case ']': e.preventDefault(); moveCardToAdjacentColumn(+1); break;
+      case 'Escape':
+        if (focusedCard) {{ focusCard(null); }}
+        document.getElementById('shortcuts-panel').classList.remove('open');
+        document.getElementById('btn-help').style.display = '';
+        break;
+      case '?': e.preventDefault(); toggleHelp(); break;
     }}
   }});
 </script>
