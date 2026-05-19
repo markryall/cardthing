@@ -1,5 +1,5 @@
 mod card;
 mod config;
 
-pub use card::Card;
+pub use card::{Card, ChecklistItem};
 pub use config::{Config, StatusDef};

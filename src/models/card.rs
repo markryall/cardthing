@@ -2,6 +2,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChecklistItem {
+    pub text: String,
+    #[serde(default)]
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Card {
     pub name: String,
     pub status: String,
@@ -12,6 +19,8 @@ pub struct Card {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checklist: Vec<ChecklistItem>,
 }
 
 impl Card {
@@ -25,6 +34,7 @@ impl Card {
             created_at: now,
             updated_at: now,
             tags: Vec::new(),
+            checklist: Vec::new(),
         }
     }
 

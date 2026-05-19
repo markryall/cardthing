@@ -1,4 +1,4 @@
-use crate::models::{Card, Config};
+use crate::models::{Card, ChecklistItem, Config};
 use crate::storage;
 use anyhow::Result;
 use axum::{
@@ -40,6 +40,7 @@ async fn serve(port: u16) -> Result<()> {
         .route("/events", get(sse_handler))
         .route("/cards", axum::routing::post(post_card))
         .route("/cards/:name/status", axum::routing::patch(patch_card_status))
+        .route("/cards/:name/checklist/:index", axum::routing::patch(toggle_checklist_item))
         .route("/cards/:name", axum::routing::patch(patch_card))
         .with_state(state);
 
@@ -55,7 +56,6 @@ fn watch_cards_dir(tx: broadcast::Sender<()>) {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    // Warm the directory so the watcher has something to watch
     let _ = storage::list_cards();
 
     let (stx, srx) = mpsc::channel::<notify::Result<notify::Event>>();
@@ -73,7 +73,6 @@ fn watch_cards_dir(tx: broadcast::Sender<()>) {
     loop {
         match srx.recv() {
             Ok(Ok(_)) => {
-                // Debounce: drain any events that pile up within 50 ms
                 std::thread::sleep(Duration::from_millis(50));
                 while srx.try_recv().is_ok() {}
                 let _ = tx.send(());
@@ -125,11 +124,18 @@ impl ApiResponse {
 struct StatusUpdate { status: String }
 
 #[derive(Deserialize)]
+struct ChecklistItemInput {
+    text: String,
+    checked: bool,
+}
+
+#[derive(Deserialize)]
 struct CardUpdate {
     description: String,
     status: String,
     owner: Option<String>,
     tags: Vec<String>,
+    checklist: Vec<ChecklistItemInput>,
 }
 
 #[derive(Deserialize)]
@@ -139,6 +145,7 @@ struct NewCardBody {
     status: String,
     owner: Option<String>,
     tags: Vec<String>,
+    checklist: Vec<ChecklistItemInput>,
 }
 
 async fn patch_card_status(
@@ -149,6 +156,23 @@ async fn patch_card_status(
         let config = Config::load();
         let mut card = storage::load_card(&name)?;
         card.status = config.validate_status(&body.status)?;
+        card.updated_at = Utc::now();
+        storage::save_card(&card)
+    })();
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
+}
+
+async fn toggle_checklist_item(
+    Path((name, index)): Path<(String, usize)>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let mut card = storage::load_card(&name)?;
+        let item = card.checklist.get_mut(index)
+            .ok_or_else(|| anyhow::anyhow!("Checklist item {} not found", index))?;
+        item.checked = !item.checked;
         card.updated_at = Utc::now();
         storage::save_card(&card)
     })();
@@ -169,6 +193,10 @@ async fn patch_card(
         card.status = config.validate_status(&body.status)?;
         card.owner = body.owner.filter(|o| !o.is_empty());
         card.tags = body.tags;
+        card.checklist = body.checklist.into_iter()
+            .filter(|i| !i.text.trim().is_empty())
+            .map(|i| ChecklistItem { text: i.text, checked: i.checked })
+            .collect();
         card.updated_at = Utc::now();
         storage::save_card(&card)
     })();
@@ -188,6 +216,10 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
         card.status = config.validate_status(&body.status)?;
         card.owner = body.owner.filter(|o| !o.is_empty());
         card.tags = body.tags;
+        card.checklist = body.checklist.into_iter()
+            .filter(|i| !i.text.trim().is_empty())
+            .map(|i| ChecklistItem { text: i.text, checked: i.checked })
+            .collect();
         card.validate()?;
         storage::save_card(&card)
     })();
@@ -245,9 +277,8 @@ fn render_board(cards: &[Card]) -> String {
   .column-label {{ font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
   .column-count {{ font-size: 0.75rem; background: #0f172a; color: #94a3b8; border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 500; }}
   .column-cards {{ min-height: 2rem; }}
-  .card {{ background: #0f172a; border-radius: 0.5rem; padding: 0.875rem; margin-bottom: 0.625rem; border: 1px solid #1e293b; cursor: grab; }}
+  .card {{ background: #0f172a; border-radius: 0.5rem; padding: 0.875rem; margin-bottom: 0.625rem; border: 1px solid #1e293b; cursor: pointer; }}
   .card:last-child {{ margin-bottom: 0; }}
-  .card:active {{ cursor: grabbing; }}
   .card-name {{ font-size: 0.875rem; font-weight: 600; color: #f1f5f9; margin-bottom: 0.375rem; }}
   .card-desc {{ font-size: 0.775rem; color: #94a3b8; line-height: 1.4; margin-bottom: 0.5rem; }}
   .card-meta {{ display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: center; }}
@@ -256,20 +287,34 @@ fn render_board(cards: &[Card]) -> String {
   .empty {{ font-size: 0.775rem; color: #475569; text-align: center; padding: 1.5rem 0; }}
   .sortable-ghost {{ opacity: 0.3; }}
   .sortable-drag {{ opacity: 0.9; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }}
+  /* Checklist progress on card */
+  .checklist-progress {{ font-size: 0.7rem; color: #64748b; margin-top: 0.5rem; display: flex; align-items: center; gap: 0.375rem; }}
+  .progress-bar {{ flex: 1; height: 3px; background: #1e293b; border-radius: 999px; overflow: hidden; }}
+  .progress-fill {{ height: 100%; background: #10b981; border-radius: 999px; }}
   /* Modal */
   .backdrop {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }}
   .backdrop.open {{ display: flex; }}
-  .modal {{ background: #1e293b; border-radius: 0.75rem; padding: 1.5rem; width: 100%; max-width: 460px; margin: 1rem; }}
+  .modal {{ background: #1e293b; border-radius: 0.75rem; padding: 1.5rem; width: 100%; max-width: 480px; margin: 1rem; max-height: 90vh; overflow-y: auto; }}
   .modal-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }}
   .modal-title {{ font-size: 1rem; font-weight: 600; color: #f1f5f9; }}
   .modal-close {{ background: none; border: none; color: #64748b; cursor: pointer; font-size: 1.5rem; line-height: 1; padding: 0; }}
   .modal-close:hover {{ color: #f1f5f9; }}
   .field {{ margin-bottom: 0.875rem; }}
   .field label {{ display: block; font-size: 0.75rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.04em; }}
-  .field input, .field textarea, .field select {{ width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.875rem; padding: 0.5rem 0.625rem; font-family: inherit; }}
-  .field input:focus, .field textarea:focus, .field select:focus {{ outline: none; border-color: #3b82f6; }}
+  .field input[type=text], .field textarea, .field select {{ width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.875rem; padding: 0.5rem 0.625rem; font-family: inherit; }}
+  .field input[type=text]:focus, .field textarea:focus, .field select:focus {{ outline: none; border-color: #3b82f6; }}
   .field textarea {{ resize: vertical; min-height: 72px; }}
   .field select {{ appearance: none; cursor: pointer; }}
+  /* Checklist in modal */
+  .cl-items {{ display: flex; flex-direction: column; gap: 0.375rem; margin-bottom: 0.5rem; }}
+  .cl-row {{ display: flex; align-items: center; gap: 0.375rem; }}
+  .cl-row input[type=checkbox] {{ cursor: pointer; accent-color: #10b981; flex-shrink: 0; }}
+  .cl-row input[type=text] {{ flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.8rem; padding: 0.375rem 0.5rem; font-family: inherit; }}
+  .cl-row input[type=text]:focus {{ outline: none; border-color: #3b82f6; }}
+  .cl-del {{ background: none; border: none; color: #475569; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.25rem; flex-shrink: 0; }}
+  .cl-del:hover {{ color: #f87171; }}
+  .btn-add-item {{ background: none; border: 1px dashed #334155; border-radius: 0.375rem; color: #64748b; cursor: pointer; font-size: 0.775rem; padding: 0.375rem 0.625rem; width: 100%; text-align: left; }}
+  .btn-add-item:hover {{ border-color: #64748b; color: #94a3b8; }}
   .modal-error {{ color: #f87171; font-size: 0.775rem; min-height: 1rem; margin-top: 0.25rem; }}
   .modal-footer {{ display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }}
   .btn {{ border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem; font-weight: 500; padding: 0.5rem 1rem; }}
@@ -315,6 +360,11 @@ fn render_board(cards: &[Card]) -> String {
     <div class="field">
       <label>Tags</label>
       <input id="f-tags" type="text" placeholder="comma-separated">
+    </div>
+    <div class="field">
+      <label>Checklist</label>
+      <div class="cl-items" id="cl-items"></div>
+      <button class="btn-add-item" onclick="addChecklistRow()">+ Add item</button>
     </div>
     <div class="modal-error" id="modal-error"></div>
     <div class="modal-footer">
@@ -373,7 +423,32 @@ fn render_board(cards: &[Card]) -> String {
     }});
   }});
 
-  // ── Modal ────────────────────────────────────────────────────────────────
+  // ── Checklist modal helpers ───────────────────────────────────────────────
+  function addChecklistRow(text = '', checked = false) {{
+    const container = document.getElementById('cl-items');
+    const row = document.createElement('div');
+    row.className = 'cl-row';
+    row.innerHTML = `
+      <input type="checkbox" ${{checked ? 'checked' : ''}}>
+      <input type="text" value="${{escapeAttr(text)}}" placeholder="Item text">
+      <button class="cl-del" onclick="this.closest('.cl-row').remove()" title="Remove">&#x2715;</button>
+    `;
+    container.appendChild(row);
+    row.querySelector('input[type=text]').focus();
+  }}
+
+  function escapeAttr(s) {{
+    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }}
+
+  function getChecklistFromModal() {{
+    return Array.from(document.querySelectorAll('#cl-items .cl-row')).map(row => ({{
+      text: row.querySelector('input[type=text]').value.trim(),
+      checked: row.querySelector('input[type=checkbox]').checked,
+    }})).filter(i => i.text);
+  }}
+
+  // ── Modal open/close ─────────────────────────────────────────────────────
   function openCreate() {{
     modalMode = 'create';
     editCardName = null;
@@ -385,6 +460,7 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-status').value = DEFAULT_STATUS;
     document.getElementById('f-owner').value = '';
     document.getElementById('f-tags').value = '';
+    document.getElementById('cl-items').innerHTML = '';
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
     document.getElementById('f-name').focus();
@@ -401,6 +477,9 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-status').value = el.dataset.status || DEFAULT_STATUS;
     document.getElementById('f-owner').value = el.dataset.owner || '';
     document.getElementById('f-tags').value = el.dataset.tags || '';
+    document.getElementById('cl-items').innerHTML = '';
+    const checklist = JSON.parse(el.dataset.checklist || '[]');
+    checklist.forEach(item => addChecklistRow(item.text, item.checked));
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
     document.getElementById('f-desc').focus();
@@ -424,6 +503,7 @@ fn render_board(cards: &[Card]) -> String {
     const owner = document.getElementById('f-owner').value.trim() || null;
     const tags = document.getElementById('f-tags').value
       .split(',').map(t => t.trim()).filter(Boolean);
+    const checklist = getChecklistFromModal();
 
     let url, method, body;
     if (modalMode === 'create') {{
@@ -431,11 +511,11 @@ fn render_board(cards: &[Card]) -> String {
       if (!name) {{ errorEl.textContent = 'Name is required'; return; }}
       url = '/cards';
       method = 'POST';
-      body = {{ name, description, status, owner, tags }};
+      body = {{ name, description, status, owner, tags, checklist }};
     }} else {{
       url = `/cards/${{encodeURIComponent(editCardName)}}`;
       method = 'PATCH';
-      body = {{ description, status, owner, tags }};
+      body = {{ description, status, owner, tags, checklist }};
     }}
 
     const btn = document.getElementById('modal-submit');
@@ -529,6 +609,17 @@ fn render_card(card: &Card) -> String {
         format!(r#"<div class="card-meta">{}</div>"#, meta_html)
     };
 
+    let checklist_html = render_card_checklist(card);
+
+    let checklist_json = card.checklist.iter()
+        .map(|i| format!(
+            r#"{{"text":{},"checked":{}}}"#,
+            serde_json::to_string(&i.text).unwrap_or_default(),
+            i.checked
+        ))
+        .collect::<Vec<_>>()
+        .join(",");
+
     format!(
         r#"<div class="card"
   data-name="{name}"
@@ -536,18 +627,41 @@ fn render_card(card: &Card) -> String {
   data-status="{status}"
   data-owner="{owner}"
   data-tags="{tags}"
+  data-checklist="[{checklist_json}]"
   onclick="openEdit(this)">
   <div class="card-name">{name_display}</div>
-  {desc_display}{meta_div}
+  {desc_display}{meta_div}{checklist_html}
 </div>"#,
         name = escape_html(&card.name),
         desc = escape_html(&card.description),
         status = escape_html(&card.status),
         owner = escape_html(card.owner.as_deref().unwrap_or("")),
         tags = escape_html(&card.tags.join(",")),
+        checklist_json = escape_html(&checklist_json),
         name_display = escape_html(&card.name),
         desc_display = desc_display,
         meta_div = meta_div,
+        checklist_html = checklist_html,
+    )
+}
+
+fn render_card_checklist(card: &Card) -> String {
+    if card.checklist.is_empty() {
+        return String::new();
+    }
+
+    let total = card.checklist.len();
+    let done = card.checklist.iter().filter(|i| i.checked).count();
+    let pct = if total > 0 { done * 100 / total } else { 0 };
+
+    format!(
+        r#"<div class="checklist-progress">
+  <div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div>
+  <span class="progress-label">{done}/{total}</span>
+</div>"#,
+        pct = pct,
+        done = done,
+        total = total,
     )
 }
 
