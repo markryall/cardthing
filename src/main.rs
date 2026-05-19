@@ -32,6 +32,8 @@ fn main() {
             format,
         }) => commands::list::execute(status, owner, tag, format),
 
+        Some(Commands::Init) => commands::init::execute(),
+
         Some(Commands::Shell) | None => {
             // Enter shell mode if no command specified or explicit shell command
             shell::run()

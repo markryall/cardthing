@@ -78,6 +78,9 @@ pub enum Commands {
         format: String,
     },
 
+    /// Initialise a new cardthing project
+    Init,
+
     /// Enter interactive shell mode
     Shell,
 
