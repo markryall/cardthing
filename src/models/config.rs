@@ -17,14 +17,20 @@ impl StatusDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default = "default_title")]
+    pub title: String,
     #[serde(default = "default_statuses")]
     pub statuses: Vec<StatusDef>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { statuses: default_statuses() }
+        Config { title: default_title(), statuses: default_statuses() }
     }
+}
+
+fn default_title() -> String {
+    "Board".to_string()
 }
 
 impl Config {

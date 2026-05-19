@@ -255,6 +255,7 @@ fn render_board(cards: &[Card]) -> String {
     let default_status = escape_html(
         config.statuses.first().map(|s| s.id.as_str()).unwrap_or("todo"),
     );
+    let title = escape_html(&config.title);
 
     format!(
         r#"<!DOCTYPE html>
@@ -262,7 +263,7 @@ fn render_board(cards: &[Card]) -> String {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cardthing Board</title>
+<title>{title}</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }}
@@ -339,7 +340,7 @@ fn render_board(cards: &[Card]) -> String {
 </head>
 <body>
 <header>
-  <h1>Cardthing Board</h1>
+  <h1>{title}</h1>
   <span class="count">{total} cards</span>
   <button class="btn-new" onclick="openCreate()">+ New Card</button>
 </header>
