@@ -29,7 +29,7 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
-        fs::read_to_string(".cardthing.toml")
+        fs::read_to_string(".cards.toml")
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default()
