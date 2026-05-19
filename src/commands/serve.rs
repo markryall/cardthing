@@ -1,10 +1,26 @@
 use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::Result;
-use axum::{extract::Path, response::Html, routing::get, Json, Router};
+use axum::{
+    extract::{Path, State},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Html,
+    },
+    routing::get,
+    Json, Router,
+};
 use chrono::Utc;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use tokio::sync::broadcast;
+use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
+
+#[derive(Clone)]
+struct AppState {
+    tx: broadcast::Sender<()>,
+}
 
 pub fn execute(port: u16) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -12,15 +28,69 @@ pub fn execute(port: u16) -> Result<()> {
 }
 
 async fn serve(port: u16) -> Result<()> {
+    let (tx, _) = broadcast::channel::<()>(16);
+
+    let tx_watch = tx.clone();
+    std::thread::spawn(move || watch_cards_dir(tx_watch));
+
+    let state = Arc::new(AppState { tx });
+
     let app = Router::new()
         .route("/", get(board_handler))
-        .route("/cards/:name/status", axum::routing::patch(patch_card_status));
+        .route("/events", get(sse_handler))
+        .route("/cards", axum::routing::post(post_card))
+        .route("/cards/:name/status", axum::routing::patch(patch_card_status))
+        .route("/cards/:name", axum::routing::patch(patch_card))
+        .with_state(state);
+
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("Cardthing board running at http://localhost:{}", port);
     println!("Press Ctrl-C to stop.");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn watch_cards_dir(tx: broadcast::Sender<()>) {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    // Warm the directory so the watcher has something to watch
+    let _ = storage::list_cards();
+
+    let (stx, srx) = mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher = match RecommendedWatcher::new(stx, notify::Config::default()) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+    if watcher
+        .watch(std::path::Path::new(".cards"), RecursiveMode::NonRecursive)
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        match srx.recv() {
+            Ok(Ok(_)) => {
+                // Debounce: drain any events that pile up within 50 ms
+                std::thread::sleep(Duration::from_millis(50));
+                while srx.try_recv().is_ok() {}
+                let _ = tx.send(());
+            }
+            Ok(Err(_)) | Err(_) => break,
+        }
+    }
+}
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
+
+async fn sse_handler(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = BroadcastStream::new(state.tx.subscribe())
+        .map(|_| Ok(Event::default().event("refresh").data("")));
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn board_handler() -> Html<String> {
@@ -37,16 +107,38 @@ async fn board_handler() -> Html<String> {
     Html(html)
 }
 
-#[derive(Deserialize)]
-struct StatusUpdate {
-    status: String,
-}
+// ── API types ─────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct ApiResponse {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+impl ApiResponse {
+    fn ok() -> Json<Self> { Json(Self { ok: true, error: None }) }
+    fn err(e: impl ToString) -> Json<Self> { Json(Self { ok: false, error: Some(e.to_string()) }) }
+}
+
+#[derive(Deserialize)]
+struct StatusUpdate { status: String }
+
+#[derive(Deserialize)]
+struct CardUpdate {
+    description: String,
+    status: String,
+    owner: Option<String>,
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct NewCardBody {
+    name: String,
+    description: String,
+    status: String,
+    owner: Option<String>,
+    tags: Vec<String>,
 }
 
 async fn patch_card_status(
@@ -58,18 +150,58 @@ async fn patch_card_status(
         let mut card = storage::load_card(&name)?;
         card.status = config.validate_status(&body.status)?;
         card.updated_at = Utc::now();
-        storage::save_card(&card)?;
-        Ok(())
+        storage::save_card(&card)
     })();
-
     match result {
-        Ok(_) => Json(ApiResponse { ok: true, error: None }),
-        Err(e) => Json(ApiResponse { ok: false, error: Some(e.to_string()) }),
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
     }
 }
 
+async fn patch_card(
+    Path(name): Path<String>,
+    Json(body): Json<CardUpdate>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let config = Config::load();
+        let mut card = storage::load_card(&name)?;
+        card.description = body.description;
+        card.status = config.validate_status(&body.status)?;
+        card.owner = body.owner.filter(|o| !o.is_empty());
+        card.tags = body.tags;
+        card.updated_at = Utc::now();
+        storage::save_card(&card)
+    })();
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
+}
+
+async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        if storage::card_exists(&body.name) {
+            anyhow::bail!("Card '{}' already exists", body.name);
+        }
+        let config = Config::load();
+        let mut card = Card::new(body.name, body.description);
+        card.status = config.validate_status(&body.status)?;
+        card.owner = body.owner.filter(|o| !o.is_empty());
+        card.tags = body.tags;
+        card.validate()?;
+        storage::save_card(&card)
+    })();
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
 fn render_board(cards: &[Card]) -> String {
     let config = Config::load();
+
     let columns_html: String = config
         .statuses
         .iter()
@@ -78,6 +210,19 @@ fn render_board(cards: &[Card]) -> String {
             render_column(&col.id, &col.label, &col.color, &col_cards)
         })
         .collect();
+
+    let status_options: String = config
+        .statuses
+        .iter()
+        .map(|s| format!(
+            r#"<option value="{}">{}</option>"#,
+            escape_html(&s.id), escape_html(&s.label)
+        ))
+        .collect();
+
+    let default_status = escape_html(
+        config.statuses.first().map(|s| s.id.as_str()).unwrap_or("todo"),
+    );
 
     format!(
         r#"<!DOCTYPE html>
@@ -91,8 +236,10 @@ fn render_board(cards: &[Card]) -> String {
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }}
   header {{ padding: 1.5rem 2rem; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 0.75rem; }}
   header h1 {{ font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; color: #f8fafc; }}
-  header span {{ font-size: 0.8rem; color: #64748b; }}
-  .board {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; padding: 1.5rem 2rem; align-items: start; }}
+  header .count {{ font-size: 0.8rem; color: #64748b; flex: 1; }}
+  .btn-new {{ background: #3b82f6; color: #fff; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.8rem; font-weight: 500; padding: 0.4rem 0.875rem; }}
+  .btn-new:hover {{ background: #2563eb; }}
+  .board {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; padding: 1.5rem 2rem; align-items: start; }}
   .column {{ background: #1e293b; border-radius: 0.75rem; padding: 1rem; }}
   .column-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }}
   .column-label {{ font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
@@ -109,28 +256,102 @@ fn render_board(cards: &[Card]) -> String {
   .empty {{ font-size: 0.775rem; color: #475569; text-align: center; padding: 1.5rem 0; }}
   .sortable-ghost {{ opacity: 0.3; }}
   .sortable-drag {{ opacity: 0.9; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }}
-  @media (max-width: 900px) {{ .board {{ grid-template-columns: repeat(2, 1fr); }} }}
+  /* Modal */
+  .backdrop {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }}
+  .backdrop.open {{ display: flex; }}
+  .modal {{ background: #1e293b; border-radius: 0.75rem; padding: 1.5rem; width: 100%; max-width: 460px; margin: 1rem; }}
+  .modal-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }}
+  .modal-title {{ font-size: 1rem; font-weight: 600; color: #f1f5f9; }}
+  .modal-close {{ background: none; border: none; color: #64748b; cursor: pointer; font-size: 1.5rem; line-height: 1; padding: 0; }}
+  .modal-close:hover {{ color: #f1f5f9; }}
+  .field {{ margin-bottom: 0.875rem; }}
+  .field label {{ display: block; font-size: 0.75rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+  .field input, .field textarea, .field select {{ width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.875rem; padding: 0.5rem 0.625rem; font-family: inherit; }}
+  .field input:focus, .field textarea:focus, .field select:focus {{ outline: none; border-color: #3b82f6; }}
+  .field textarea {{ resize: vertical; min-height: 72px; }}
+  .field select {{ appearance: none; cursor: pointer; }}
+  .modal-error {{ color: #f87171; font-size: 0.775rem; min-height: 1rem; margin-top: 0.25rem; }}
+  .modal-footer {{ display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }}
+  .btn {{ border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem; font-weight: 500; padding: 0.5rem 1rem; }}
+  .btn-ghost {{ background: transparent; color: #94a3b8; border: 1px solid #334155; }}
+  .btn-ghost:hover {{ color: #f1f5f9; border-color: #64748b; }}
+  .btn-primary {{ background: #3b82f6; color: #fff; }}
+  .btn-primary:hover {{ background: #2563eb; }}
   @media (max-width: 500px) {{ .board {{ grid-template-columns: 1fr; }} }}
 </style>
 </head>
 <body>
 <header>
   <h1>Cardthing Board</h1>
-  <span>{total} cards</span>
+  <span class="count">{total} cards</span>
+  <button class="btn-new" onclick="openCreate()">+ New Card</button>
 </header>
 <div class="board">
 {columns}
 </div>
+
+<div class="backdrop" id="backdrop" onclick="backdropClick(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">New Card</span>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="field" id="name-field">
+      <label>Name</label>
+      <input id="f-name" type="text" placeholder="card-name">
+    </div>
+    <div class="field">
+      <label>Description</label>
+      <textarea id="f-desc" placeholder="What needs to be done?"></textarea>
+    </div>
+    <div class="field">
+      <label>Status</label>
+      <select id="f-status">{status_options}</select>
+    </div>
+    <div class="field">
+      <label>Owner</label>
+      <input id="f-owner" type="text" placeholder="someone">
+    </div>
+    <div class="field">
+      <label>Tags</label>
+      <input id="f-tags" type="text" placeholder="comma-separated">
+    </div>
+    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-submit" onclick="submitModal()">Create</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script>
+  const DEFAULT_STATUS = '{default_status}';
+  let modalMode = null;
+  let editCardName = null;
+  let dragging = false;
+  let pendingRefresh = false;
+
+  // ── Live reload via SSE ──────────────────────────────────────────────────
+  const evtSource = new EventSource('/events');
+  evtSource.addEventListener('refresh', () => {{
+    if (document.getElementById('backdrop').classList.contains('open')) {{
+      pendingRefresh = true;
+    }} else {{
+      location.reload();
+    }}
+  }});
+
+  // ── Drag and drop ────────────────────────────────────────────────────────
   document.querySelectorAll('.column').forEach(col => {{
-    const cards = col.querySelector('.column-cards');
-    new Sortable(cards, {{
+    new Sortable(col.querySelector('.column-cards'), {{
       group: 'cards',
       animation: 150,
       ghostClass: 'sortable-ghost',
       dragClass: 'sortable-drag',
+      onStart() {{ dragging = true; }},
       onEnd(evt) {{
+        setTimeout(() => {{ dragging = false; }}, 0);
         if (evt.from === evt.to) return;
         const name = evt.item.dataset.name;
         const status = evt.to.closest('.column').dataset.status;
@@ -140,16 +361,119 @@ fn render_board(cards: &[Card]) -> String {
           body: JSON.stringify({{ status }}),
         }})
           .then(r => r.json())
-          .then(data => {{ if (!data.ok) location.reload(); }})
+          .then(data => {{
+            if (data.ok) {{
+              evt.item.dataset.status = status;
+            }} else {{
+              location.reload();
+            }}
+          }})
           .catch(() => location.reload());
       }}
     }});
+  }});
+
+  // ── Modal ────────────────────────────────────────────────────────────────
+  function openCreate() {{
+    modalMode = 'create';
+    editCardName = null;
+    document.getElementById('modal-title').textContent = 'New Card';
+    document.getElementById('modal-submit').textContent = 'Create';
+    document.getElementById('name-field').style.display = '';
+    document.getElementById('f-name').value = '';
+    document.getElementById('f-desc').value = '';
+    document.getElementById('f-status').value = DEFAULT_STATUS;
+    document.getElementById('f-owner').value = '';
+    document.getElementById('f-tags').value = '';
+    document.getElementById('modal-error').textContent = '';
+    document.getElementById('backdrop').classList.add('open');
+    document.getElementById('f-name').focus();
+  }}
+
+  function openEdit(el) {{
+    if (dragging) return;
+    modalMode = 'edit';
+    editCardName = el.dataset.name;
+    document.getElementById('modal-title').textContent = el.dataset.name;
+    document.getElementById('modal-submit').textContent = 'Save';
+    document.getElementById('name-field').style.display = 'none';
+    document.getElementById('f-desc').value = el.dataset.description || '';
+    document.getElementById('f-status').value = el.dataset.status || DEFAULT_STATUS;
+    document.getElementById('f-owner').value = el.dataset.owner || '';
+    document.getElementById('f-tags').value = el.dataset.tags || '';
+    document.getElementById('modal-error').textContent = '';
+    document.getElementById('backdrop').classList.add('open');
+    document.getElementById('f-desc').focus();
+  }}
+
+  function closeModal() {{
+    document.getElementById('backdrop').classList.remove('open');
+    if (pendingRefresh) {{ pendingRefresh = false; location.reload(); }}
+  }}
+
+  function backdropClick(evt) {{
+    if (evt.target === document.getElementById('backdrop')) closeModal();
+  }}
+
+  async function submitModal() {{
+    const errorEl = document.getElementById('modal-error');
+    errorEl.textContent = '';
+
+    const description = document.getElementById('f-desc').value.trim();
+    const status = document.getElementById('f-status').value;
+    const owner = document.getElementById('f-owner').value.trim() || null;
+    const tags = document.getElementById('f-tags').value
+      .split(',').map(t => t.trim()).filter(Boolean);
+
+    let url, method, body;
+    if (modalMode === 'create') {{
+      const name = document.getElementById('f-name').value.trim();
+      if (!name) {{ errorEl.textContent = 'Name is required'; return; }}
+      url = '/cards';
+      method = 'POST';
+      body = {{ name, description, status, owner, tags }};
+    }} else {{
+      url = `/cards/${{encodeURIComponent(editCardName)}}`;
+      method = 'PATCH';
+      body = {{ description, status, owner, tags }};
+    }}
+
+    const btn = document.getElementById('modal-submit');
+    btn.disabled = true;
+    try {{
+      const r = await fetch(url, {{
+        method,
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(body),
+      }});
+      const data = await r.json();
+      if (data.ok) {{
+        pendingRefresh = false;
+        location.reload();
+      }} else {{
+        errorEl.textContent = data.error || 'Something went wrong';
+        btn.disabled = false;
+      }}
+    }} catch (e) {{
+      errorEl.textContent = 'Network error';
+      btn.disabled = false;
+    }}
+  }}
+
+  document.addEventListener('keydown', e => {{
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Enter' && e.metaKey &&
+        document.getElementById('backdrop').classList.contains('open')) {{
+      submitModal();
+    }}
   }});
 </script>
 </body>
 </html>"#,
         total = cards.len(),
         columns = columns_html,
+        status_options = status_options,
+        default_status = default_status,
     )
 }
 
@@ -179,7 +503,7 @@ fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> 
 }
 
 fn render_card(card: &Card) -> String {
-    let desc = if card.description.is_empty() {
+    let desc_display = if card.description.is_empty() {
         String::new()
     } else {
         format!(
@@ -188,38 +512,42 @@ fn render_card(card: &Card) -> String {
         )
     };
 
-    let meta: String = {
+    let meta_html: String = {
         let mut parts = Vec::new();
         if let Some(owner) = &card.owner {
-            parts.push(format!(
-                r#"<span class="owner">{}</span>"#,
-                escape_html(owner)
-            ));
+            parts.push(format!(r#"<span class="owner">{}</span>"#, escape_html(owner)));
         }
         for tag in &card.tags {
-            parts.push(format!(
-                r#"<span class="tag">{}</span>"#,
-                escape_html(tag)
-            ));
+            parts.push(format!(r#"<span class="tag">{}</span>"#, escape_html(tag)));
         }
         parts.join("")
     };
 
-    let meta_div = if meta.is_empty() {
+    let meta_div = if meta_html.is_empty() {
         String::new()
     } else {
-        format!(r#"<div class="card-meta">{}</div>"#, meta)
+        format!(r#"<div class="card-meta">{}</div>"#, meta_html)
     };
 
     format!(
-        r#"<div class="card" data-name="{name_attr}">
-  <div class="card-name">{name}</div>
-  {desc}{meta}
+        r#"<div class="card"
+  data-name="{name}"
+  data-description="{desc}"
+  data-status="{status}"
+  data-owner="{owner}"
+  data-tags="{tags}"
+  onclick="openEdit(this)">
+  <div class="card-name">{name_display}</div>
+  {desc_display}{meta_div}
 </div>"#,
-        name_attr = escape_html(&card.name),
         name = escape_html(&card.name),
-        desc = desc,
-        meta = meta_div,
+        desc = escape_html(&card.description),
+        status = escape_html(&card.status),
+        owner = escape_html(card.owner.as_deref().unwrap_or("")),
+        tags = escape_html(&card.tags.join(",")),
+        name_display = escape_html(&card.name),
+        desc_display = desc_display,
+        meta_div = meta_div,
     )
 }
 
