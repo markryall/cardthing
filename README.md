@@ -11,7 +11,7 @@ A simple, fast command-line tool for managing task cards, written in Rust. A spi
 - **Filtering**: List cards by status, owner, or tag
 - **Multiple output formats**: Table view or JSON export
 - **Colored output**: Visual status indicators (Todo=Yellow, InProgress=Blue, Done=Green, Blocked=Red)
-- **Web board**: Kanban view with drag-and-drop, live reload, and keyboard navigation
+- **Web board**: Kanban view with drag-and-drop, live reload, keyboard navigation, and column management
 - **Checklists**: Per-card checklist items with progress tracking
 
 ## Installation
@@ -147,6 +147,7 @@ Open `http://localhost:3000` in your browser to see a kanban board organized by 
 - **Click any card** to open an edit modal (description, status, owner, tags, checklist)
 - **New Card button** to create cards directly from the browser
 - **Checklist progress bar** shown on each card
+- **Column management** — add, rename, reorder (drag the column header), and delete columns (only when empty) via the `+ Column` button and per-column controls
 
 **Keyboard shortcuts:**
 
