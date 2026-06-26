@@ -1,2 +1,3 @@
 /target
-.cards/
+/.cards/
+/.cards.toml

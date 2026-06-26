@@ -22,6 +22,12 @@ struct AppState {
     tx: broadcast::Sender<()>,
 }
 
+const COLUMN_COLORS: &[&str] = &[
+    "#f59e0b", "#3b82f6", "#10b981", "#ef4444",
+    "#a855f7", "#f97316", "#06b6d4", "#ec4899",
+    "#84cc16", "#14b8a6",
+];
+
 pub fn execute(port: u16) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(serve(port))
@@ -42,6 +48,9 @@ async fn serve(port: u16) -> Result<()> {
         .route("/cards/:name/status", axum::routing::patch(patch_card_status))
         .route("/cards/:name/checklist/:index", axum::routing::patch(toggle_checklist_item))
         .route("/cards/:name", axum::routing::patch(patch_card))
+        .route("/columns", axum::routing::post(post_column))
+        .route("/columns/order", axum::routing::put(put_column_order))
+        .route("/columns/:id", axum::routing::patch(patch_column).delete(delete_column))
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -229,6 +238,100 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
     }
 }
 
+// ── Column handlers ───────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct NewColumnBody { label: String }
+
+#[derive(Deserialize)]
+struct ColumnUpdate { label: String }
+
+async fn post_column(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<NewColumnBody>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let label = body.label.trim().to_string();
+        if label.is_empty() { anyhow::bail!("Column name is required"); }
+        let mut config = Config::load();
+        let id: String = label.to_lowercase().replace(' ', "-")
+            .chars().filter(|c| c.is_alphanumeric() || *c == '-').collect();
+        if id.is_empty() { anyhow::bail!("Invalid column name"); }
+        if config.statuses.iter().any(|s| s.id == id) {
+            anyhow::bail!("A column with that name already exists");
+        }
+        let color = COLUMN_COLORS[config.statuses.len() % COLUMN_COLORS.len()].to_string();
+        config.statuses.push(crate::models::StatusDef { id, label, color });
+        config.save()
+    })();
+    if result.is_ok() { let _ = state.tx.send(()); }
+    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+}
+
+async fn patch_column(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<ColumnUpdate>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let label = body.label.trim().to_string();
+        if label.is_empty() { anyhow::bail!("Column name is required"); }
+        let mut config = Config::load();
+        let status = config.statuses.iter_mut().find(|s| s.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Column '{}' not found", id))?;
+        status.label = label;
+        config.save()
+    })();
+    if result.is_ok() { let _ = state.tx.send(()); }
+    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+}
+
+#[derive(Deserialize)]
+struct ColumnOrder { order: Vec<String> }
+
+async fn put_column_order(
+    Json(body): Json<ColumnOrder>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let mut config = Config::load();
+        if body.order.len() != config.statuses.len() {
+            anyhow::bail!("Order must include all columns");
+        }
+        let mut reordered = Vec::with_capacity(config.statuses.len());
+        for id in &body.order {
+            let status = config.statuses.iter().find(|s| &s.id == id)
+                .ok_or_else(|| anyhow::anyhow!("Unknown column '{}'", id))?
+                .clone();
+            reordered.push(status);
+        }
+        config.statuses = reordered;
+        config.save()
+    })();
+    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+}
+
+async fn delete_column(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        let cards = storage::list_cards()?;
+        let count = cards.iter().filter(|c| c.status == id).count();
+        if count > 0 {
+            anyhow::bail!("Move or delete the {} card(s) in this column first", count);
+        }
+        let mut config = Config::load();
+        let before = config.statuses.len();
+        config.statuses.retain(|s| s.id != id);
+        if config.statuses.len() == before {
+            anyhow::bail!("Column '{}' not found", id);
+        }
+        config.save()
+    })();
+    if result.is_ok() { let _ = state.tx.send(()); }
+    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+}
+
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 fn render_board(cards: &[Card]) -> String {
@@ -272,11 +375,21 @@ fn render_board(cards: &[Card]) -> String {
   header .count {{ font-size: 0.8rem; color: #64748b; flex: 1; }}
   .btn-new {{ background: #3b82f6; color: #fff; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.8rem; font-weight: 500; padding: 0.4rem 0.875rem; }}
   .btn-new:hover {{ background: #2563eb; }}
+  .btn-outline {{ background: transparent; color: #64748b; border: 1px solid #334155; border-radius: 0.375rem; cursor: pointer; font-size: 0.8rem; font-weight: 500; padding: 0.4rem 0.875rem; }}
+  .btn-outline:hover {{ color: #f1f5f9; border-color: #64748b; }}
   .board {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; padding: 1.5rem 2rem; align-items: start; }}
   .column {{ background: #1e293b; border-radius: 0.75rem; padding: 1rem; }}
-  .column-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }}
+  .column-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; cursor: grab; }}
+  .column-header:active {{ cursor: grabbing; }}
+  .btn-col-edit, .btn-col-del, .column-count {{ cursor: default; }}
   .column-label {{ font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
+  .column-actions {{ display: flex; align-items: center; gap: 0.25rem; }}
   .column-count {{ font-size: 0.75rem; background: #0f172a; color: #94a3b8; border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 500; }}
+  .btn-col-edit, .btn-col-del {{ background: none; border: none; color: #334155; cursor: pointer; font-size: 0.8rem; padding: 0.1rem 0.2rem; line-height: 1; border-radius: 0.25rem; }}
+  .btn-col-edit:hover {{ color: #94a3b8; }}
+  .btn-col-del:hover {{ color: #f87171; }}
+  .toast {{ display: none; position: fixed; top: 1.5rem; left: 50%; transform: translateX(-50%); background: #1e293b; border: 1px solid #ef4444; color: #fca5a5; border-radius: 0.5rem; padding: 0.625rem 1rem; font-size: 0.8rem; z-index: 300; white-space: nowrap; }}
+  .toast.show {{ display: block; }}
   .column-cards {{ min-height: 2rem; }}
   .card {{ background: #0f172a; border-radius: 0.5rem; padding: 0.875rem; margin-bottom: 0.625rem; border: 1px solid #1e293b; cursor: pointer; }}
   .card:last-child {{ margin-bottom: 0; }}
@@ -342,6 +455,7 @@ fn render_board(cards: &[Card]) -> String {
 <header>
   <h1>{title}</h1>
   <span class="count">{total} cards</span>
+  <button class="btn-outline" onclick="openAddColumn()">+ Column</button>
   <button class="btn-new" onclick="openCreate()">+ New Card</button>
 </header>
 <div class="board">
@@ -387,6 +501,25 @@ fn render_board(cards: &[Card]) -> String {
   </div>
 </div>
 
+<div class="backdrop" id="col-backdrop" onclick="colBackdropClick(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="col-modal-title">Add Column</span>
+      <button class="modal-close" onclick="closeColModal()">&#x2715;</button>
+    </div>
+    <div class="field">
+      <label>Name</label>
+      <input id="col-f-label" type="text" placeholder="Column name">
+    </div>
+    <div class="modal-error" id="col-modal-error"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeColModal()">Cancel</button>
+      <button class="btn btn-primary" id="col-modal-submit" onclick="submitColModal()">Add</button>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+
 <div class="shortcuts-panel" id="shortcuts-panel">
   <h3>Board</h3>
   <table>
@@ -419,14 +552,98 @@ fn render_board(cards: &[Card]) -> String {
   // ── Live reload via SSE ──────────────────────────────────────────────────
   const evtSource = new EventSource('/events');
   evtSource.addEventListener('refresh', () => {{
-    if (document.getElementById('backdrop').classList.contains('open')) {{
-      pendingRefresh = true;
-    }} else {{
-      location.reload();
-    }}
+    const anyOpen = document.getElementById('backdrop').classList.contains('open') ||
+                    document.getElementById('col-backdrop').classList.contains('open');
+    if (anyOpen) {{ pendingRefresh = true; }} else {{ location.reload(); }}
+  }});
+
+  // ── Column modal ─────────────────────────────────────────────────────────
+  let colModalMode = null;
+  let editColId = null;
+
+  function openAddColumn() {{
+    colModalMode = 'add';
+    editColId = null;
+    document.getElementById('col-modal-title').textContent = 'Add Column';
+    document.getElementById('col-modal-submit').textContent = 'Add';
+    document.getElementById('col-f-label').value = '';
+    document.getElementById('col-modal-error').textContent = '';
+    document.getElementById('col-backdrop').classList.add('open');
+    document.getElementById('col-f-label').focus();
+  }}
+
+  function openEditColumn(id, label) {{
+    colModalMode = 'edit';
+    editColId = id;
+    document.getElementById('col-modal-title').textContent = 'Rename Column';
+    document.getElementById('col-modal-submit').textContent = 'Save';
+    document.getElementById('col-f-label').value = label;
+    document.getElementById('col-modal-error').textContent = '';
+    document.getElementById('col-backdrop').classList.add('open');
+    document.getElementById('col-f-label').focus();
+    document.getElementById('col-f-label').select();
+  }}
+
+  function closeColModal() {{
+    document.getElementById('col-backdrop').classList.remove('open');
+    if (pendingRefresh) {{ pendingRefresh = false; location.reload(); }}
+  }}
+
+  function colBackdropClick(evt) {{
+    if (evt.target === document.getElementById('col-backdrop')) closeColModal();
+  }}
+
+  async function submitColModal() {{
+    const errorEl = document.getElementById('col-modal-error');
+    errorEl.textContent = '';
+    const label = document.getElementById('col-f-label').value.trim();
+    if (!label) {{ errorEl.textContent = 'Name is required'; return; }}
+    const btn = document.getElementById('col-modal-submit');
+    btn.disabled = true;
+    const url = colModalMode === 'add' ? '/columns' : `/columns/${{encodeURIComponent(editColId)}}`;
+    const method = colModalMode === 'add' ? 'POST' : 'PATCH';
+    try {{
+      const r = await fetch(url, {{ method, headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify({{ label }}) }});
+      const data = await r.json();
+      if (data.ok) {{ closeColModal(); }} else {{ errorEl.textContent = data.error || 'Something went wrong'; btn.disabled = false; }}
+    }} catch (e) {{ errorEl.textContent = 'Network error'; btn.disabled = false; }}
+  }}
+
+  async function deleteColumn(id) {{
+    const r = await fetch(`/columns/${{encodeURIComponent(id)}}`, {{ method: 'DELETE' }});
+    const data = await r.json();
+    if (!data.ok) showToast(data.error || 'Could not delete column');
+  }}
+
+  function showToast(msg) {{
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }}
+
+  document.getElementById('col-f-label').addEventListener('keydown', e => {{
+    if (e.key === 'Enter') {{ e.preventDefault(); submitColModal(); }}
   }});
 
   // ── Drag and drop ────────────────────────────────────────────────────────
+  new Sortable(document.querySelector('.board'), {{
+    animation: 150,
+    handle: '.column-header',
+    draggable: '.column',
+    ghostClass: 'sortable-ghost',
+    dragClass: 'sortable-drag',
+    onEnd(evt) {{
+      if (evt.oldIndex === evt.newIndex) return;
+      const order = Array.from(document.querySelectorAll('.column')).map(c => c.dataset.status);
+      fetch('/columns/order', {{
+        method: 'PUT',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ order }}),
+      }}).catch(() => location.reload());
+    }}
+  }});
+
   document.querySelectorAll('.column').forEach(col => {{
     new Sortable(col.querySelector('.column-cards'), {{
       group: 'cards',
@@ -705,12 +922,16 @@ fn render_board(cards: &[Card]) -> String {
 
   document.addEventListener('keydown', e => {{
     const inInput = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
-    const modalOpen = document.getElementById('backdrop').classList.contains('open');
+    const modalOpen = document.getElementById('backdrop').classList.contains('open') ||
+                      document.getElementById('col-backdrop').classList.contains('open');
 
     // Modal shortcuts
     if (modalOpen) {{
-      if (e.key === 'Escape') {{ e.preventDefault(); closeModal(); }}
-      if (e.key === 'Enter' && e.metaKey) {{ e.preventDefault(); submitModal(); }}
+      if (e.key === 'Escape') {{
+        e.preventDefault();
+        if (document.getElementById('col-backdrop').classList.contains('open')) {{ closeColModal(); }} else {{ closeModal(); }}
+      }}
+      if (e.key === 'Enter' && e.metaKey && !document.getElementById('col-backdrop').classList.contains('open')) {{ e.preventDefault(); submitModal(); }}
       return;
     }}
 
@@ -751,11 +972,21 @@ fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> 
         cards.iter().map(|c| render_card(c)).collect()
     };
 
+    let label_json = serde_json::to_string(label).unwrap_or_default();
+    let del_btn = if cards.is_empty() {
+        format!(r#"<button class="btn-col-del" onclick="deleteColumn('{}')" title="Delete">&#x2715;</button>"#, escape_html(status_id))
+    } else {
+        String::new()
+    };
     format!(
         r#"<div class="column" data-status="{status}">
   <div class="column-header">
     <span class="column-label" style="color:{color}">{label}</span>
-    <span class="column-count">{count}</span>
+    <div class="column-actions">
+      <span class="column-count">{count}</span>
+      <button class="btn-col-edit" onclick="openEditColumn('{status}',{label_json})" title="Rename">&#9998;</button>
+      {del_btn}
+    </div>
   </div>
   <div class="column-cards">
     {cards}
@@ -764,6 +995,8 @@ fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> 
         status = escape_html(status_id),
         color = escape_html(color),
         label = escape_html(label),
+        label_json = label_json,
+        del_btn = del_btn,
         count = cards.len(),
         cards = cards_html,
     )

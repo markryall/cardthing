@@ -41,6 +41,13 @@ impl Config {
             .unwrap_or_default()
     }
 
+    pub fn save(&self) -> anyhow::Result<()> {
+        let content = toml::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
+        fs::write(".cards.toml", content)?;
+        Ok(())
+    }
+
     pub fn find_status(&self, id: &str) -> Option<&StatusDef> {
         self.statuses.iter().find(|s| s.id.eq_ignore_ascii_case(id))
     }
