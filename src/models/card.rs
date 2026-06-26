@@ -21,6 +21,8 @@ pub struct Card {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checklist: Vec<ChecklistItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
 }
 
 impl Card {
@@ -35,6 +37,7 @@ impl Card {
             updated_at: now,
             tags: Vec::new(),
             checklist: Vec::new(),
+            order: None,
         }
     }
 

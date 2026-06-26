@@ -51,6 +51,7 @@ async fn serve(port: u16) -> Result<()> {
         .route("/columns", axum::routing::post(post_column))
         .route("/columns/order", axum::routing::put(put_column_order))
         .route("/columns/:id", axum::routing::patch(patch_column).delete(delete_column))
+        .route("/columns/:id/cards/order", axum::routing::put(put_column_cards_order))
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -310,6 +311,28 @@ async fn put_column_order(
     match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
 }
 
+#[derive(Deserialize)]
+struct ColumnCardsOrder { names: Vec<String> }
+
+async fn put_column_cards_order(
+    Path(id): Path<String>,
+    Json(body): Json<ColumnCardsOrder>,
+) -> Json<ApiResponse> {
+    let result = (|| -> anyhow::Result<()> {
+        for (i, name) in body.names.iter().enumerate() {
+            let mut card = storage::load_card(name)?;
+            if card.status != id {
+                anyhow::bail!("Card '{}' is not in column '{}'", name, id);
+            }
+            card.order = Some(i as u32);
+            card.updated_at = Utc::now();
+            storage::save_card(&card)?;
+        }
+        Ok(())
+    })();
+    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+}
+
 async fn delete_column(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -341,7 +364,12 @@ fn render_board(cards: &[Card]) -> String {
         .statuses
         .iter()
         .map(|col| {
-            let col_cards: Vec<&Card> = cards.iter().filter(|c| c.status == col.id).collect();
+            let mut col_cards: Vec<&Card> = cards.iter().filter(|c| c.status == col.id).collect();
+            col_cards.sort_by(|a, b| {
+                let ao = a.order.unwrap_or(u32::MAX);
+                let bo = b.order.unwrap_or(u32::MAX);
+                ao.cmp(&bo).then_with(|| a.created_at.cmp(&b.created_at))
+            });
             render_column(&col.id, &col.label, &col.color, &col_cards)
         })
         .collect();
@@ -653,7 +681,17 @@ fn render_board(cards: &[Card]) -> String {
       onStart() {{ dragging = true; }},
       onEnd(evt) {{
         setTimeout(() => {{ dragging = false; }}, 0);
-        if (evt.from === evt.to) return;
+        if (evt.from === evt.to) {{
+          if (evt.oldIndex === evt.newIndex) return;
+          const status = evt.to.closest('.column').dataset.status;
+          const names = Array.from(evt.to.querySelectorAll('.card')).map(c => c.dataset.name);
+          fetch(`/columns/${{encodeURIComponent(status)}}/cards/order`, {{
+            method: 'PUT',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ names }}),
+          }}).catch(() => {{}});
+          return;
+        }}
         const name = evt.item.dataset.name;
         const status = evt.to.closest('.column').dataset.status;
         fetch(`/cards/${{encodeURIComponent(name)}}/status`, {{
