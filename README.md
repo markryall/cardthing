@@ -4,13 +4,15 @@ A simple, fast command-line tool for managing task cards, written in Rust. A spi
 
 ## Features
 
-- **Dual-mode interface**: Traditional CLI commands or interactive shell
+- **Three interfaces**: CLI commands, interactive shell, or live web board
 - **Simple storage**: Cards stored as human-readable TOML files in `.cards/` directory
 - **Git-friendly**: Each card is a separate file, perfect for version control
 - **Rich metadata**: Name, status, owner, description, tags, and timestamps
 - **Filtering**: List cards by status, owner, or tag
 - **Multiple output formats**: Table view or JSON export
 - **Colored output**: Visual status indicators (Todo=Yellow, InProgress=Blue, Done=Green, Blocked=Red)
+- **Web board**: Kanban view with drag-and-drop, live reload, and keyboard navigation
+- **Checklists**: Per-card checklist items with progress tracking
 
 ## Installation
 
@@ -35,7 +37,7 @@ cargo install --path .
 
 ## Usage
 
-cardthing supports two modes of operation:
+cardthing supports three modes of operation:
 
 ### CLI Mode (One-shot commands)
 
@@ -126,6 +128,39 @@ cardthing> rm "Write docs"
 # Exit shell
 cardthing> exit
 ```
+
+### Web Board Mode
+
+Launches a local web server with a live kanban board:
+
+```bash
+cardthing serve
+# or on a custom port
+cardthing serve --port 8080
+```
+
+Open `http://localhost:3000` in your browser to see a kanban board organized by status. The board updates automatically when cards change on disk (e.g. from CLI commands or git operations), so it works as a live dashboard alongside other workflows.
+
+**Board features:**
+
+- **Drag and drop** cards between columns to change status
+- **Click any card** to open an edit modal (description, status, owner, tags, checklist)
+- **New Card button** to create cards directly from the browser
+- **Checklist progress bar** shown on each card
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `n` | New card |
+| `j` / `k` | Move focus down / up |
+| `h` / `l` | Move focus left / right |
+| `[` / `]` | Move focused card left / right (changes status) |
+| `Enter` | Edit focused card |
+| `Esc` | Deselect / close |
+| `?` | Toggle shortcuts panel |
+
+Inside the edit modal, checklist items support `Enter` to add a new item below, `Backspace` on an empty item to delete it, `Ctrl+Space` to toggle checked, and arrow keys to move between items.
 
 ## Card Data Model
 
@@ -224,9 +259,9 @@ cardthing/
 │   ├── shell.rs          # Interactive REPL
 │   ├── error.rs          # Error types
 │   ├── commands/         # Command implementations
-│   │   ├── add.rs
-│   │   ├── edit.rs
-│   │   └── list.rs
+│   │   ├── init.rs
+│   │   ├── serve.rs      # Web board (axum + SSE + SortableJS)
+│   │   └── mod.rs
 │   ├── models/           # Data models
 │   │   └── card.rs
 │   └── storage/          # File I/O
