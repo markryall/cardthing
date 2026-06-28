@@ -78,6 +78,12 @@ pub enum Commands {
         format: String,
     },
 
+    /// Show full details of a card
+    Show {
+        /// Name of the card to show
+        name: String,
+    },
+
     /// Initialise a new cardthing project
     Init,
 
