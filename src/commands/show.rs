@@ -21,6 +21,10 @@ pub fn execute(name: String) -> Result<()> {
     println!("  Created: {}", card.created_at.format("%Y-%m-%d %H:%M UTC"));
     println!("  Updated: {}", card.updated_at.format("%Y-%m-%d %H:%M UTC"));
 
+    if let Some(due) = card.due_at {
+        println!("  Due:     {}", due.format("%Y-%m-%d"));
+    }
+
     if !card.tags.is_empty() {
         println!("  Tags:    {}", card.tags.join(", "));
     }

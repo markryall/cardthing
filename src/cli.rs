@@ -31,6 +31,10 @@ pub enum Commands {
         /// Add tags (comma-separated)
         #[arg(short, long, value_delimiter = ',')]
         tags: Vec<String>,
+
+        /// Due date (YYYY-MM-DD)
+        #[arg(long)]
+        due: Option<String>,
     },
 
     /// Edit an existing card
@@ -57,6 +61,14 @@ pub enum Commands {
         /// Remove tags (comma-separated)
         #[arg(long, value_delimiter = ',')]
         remove_tags: Vec<String>,
+
+        /// Set due date (YYYY-MM-DD)
+        #[arg(long)]
+        due: Option<String>,
+
+        /// Clear the due date
+        #[arg(long)]
+        clear_due: bool,
     },
 
     /// List all cards

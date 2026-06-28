@@ -23,8 +23,9 @@ fn main() {
             status,
             owner,
             tags,
+            due,
         }) => require_init()
-            .and_then(|_| commands::add::execute(name, description, status, owner, tags)),
+            .and_then(|_| commands::add::execute(name, description, status, owner, tags, due)),
 
         Some(Commands::Edit {
             name,
@@ -33,8 +34,19 @@ fn main() {
             owner,
             add_tags,
             remove_tags,
+            due,
+            clear_due,
         }) => require_init().and_then(|_| {
-            commands::edit::execute(name, description, status, owner, add_tags, remove_tags)
+            commands::edit::execute(
+                name,
+                description,
+                status,
+                owner,
+                add_tags,
+                remove_tags,
+                due,
+                clear_due,
+            )
         }),
 
         Some(Commands::Rm { name }) => {

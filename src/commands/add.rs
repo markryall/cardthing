@@ -1,3 +1,4 @@
+use crate::commands::parse_due_date;
 use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::{bail, Result};
@@ -9,6 +10,7 @@ pub fn execute(
     status: String,
     owner: Option<String>,
     tags: Vec<String>,
+    due: Option<String>,
 ) -> Result<()> {
     if storage::card_exists(&name) {
         bail!("Card '{}' already exists", name);
@@ -21,6 +23,9 @@ pub fn execute(
     card.status = status;
     card.owner = owner;
     card.tags = tags;
+    if let Some(d) = due {
+        card.due_at = Some(parse_due_date(&d)?);
+    }
 
     card.validate()?;
     storage::save_card(&card)?;

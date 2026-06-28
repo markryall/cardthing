@@ -1,3 +1,4 @@
+use crate::commands::parse_due_date;
 use crate::models::Config;
 use crate::storage;
 use anyhow::{bail, Result};
@@ -11,6 +12,8 @@ pub fn execute(
     owner: Option<String>,
     add_tags: Vec<String>,
     remove_tags: Vec<String>,
+    due: Option<String>,
+    clear_due: bool,
 ) -> Result<()> {
     let mut card = storage::load_card(&name)?;
     let mut changes = Vec::new();
@@ -49,6 +52,14 @@ pub fn execute(
             card.tags.remove(pos);
             changes.push(format!("removed tag '{}'", tag));
         }
+    }
+
+    if clear_due {
+        card.due_at = None;
+        changes.push("cleared due date".to_string());
+    } else if let Some(d) = due {
+        card.due_at = Some(parse_due_date(&d)?);
+        changes.push(format!("due date to '{}'", d));
     }
 
     if changes.is_empty() {
