@@ -78,6 +78,13 @@ pub enum Commands {
         format: String,
     },
 
+    /// Delete a card
+    #[command(alias = "delete")]
+    Rm {
+        /// Name of the card to delete
+        name: String,
+    },
+
     /// Show full details of a card
     Show {
         /// Name of the card to show

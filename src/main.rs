@@ -37,6 +37,10 @@ fn main() {
             commands::edit::execute(name, description, status, owner, add_tags, remove_tags)
         }),
 
+        Some(Commands::Rm { name }) => {
+            require_init().and_then(|_| commands::remove::execute(name))
+        }
+
         Some(Commands::Show { name }) => {
             require_init().and_then(|_| commands::show::execute(name))
         }
