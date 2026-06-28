@@ -1,3 +1,4 @@
+use crate::commands::parse_due_date;
 use crate::models::{Card, ChecklistItem, Config};
 use crate::storage;
 use anyhow::Result;
@@ -169,6 +170,8 @@ struct CardUpdate {
     owner: Option<String>,
     tags: Vec<String>,
     checklist: Vec<ChecklistItemInput>,
+    due_at: Option<String>,
+    priority: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -179,6 +182,8 @@ struct NewCardBody {
     owner: Option<String>,
     tags: Vec<String>,
     checklist: Vec<ChecklistItemInput>,
+    due_at: Option<String>,
+    priority: Option<String>,
 }
 
 async fn patch_card_status(
@@ -232,6 +237,13 @@ async fn patch_card(Path(name): Path<String>, Json(body): Json<CardUpdate>) -> J
                 checked: i.checked,
             })
             .collect();
+        card.due_at = body
+            .due_at
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(parse_due_date)
+            .transpose()?;
+        card.priority = body.priority.filter(|p| !p.is_empty());
         card.updated_at = Utc::now();
         storage::save_card(&card)
     })();
@@ -260,6 +272,13 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
                 checked: i.checked,
             })
             .collect();
+        card.due_at = body
+            .due_at
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(parse_due_date)
+            .transpose()?;
+        card.priority = body.priority.filter(|p| !p.is_empty());
         card.validate()?;
         storage::save_card(&card)
     })();
@@ -559,6 +578,14 @@ fn render_board(cards: &[Card]) -> String {
   .btn-primary {{ background: #3b82f6; color: #fff; }}
   .btn-primary:hover {{ background: #2563eb; }}
   @media (max-width: 500px) {{ .board {{ grid-template-columns: 1fr; }} }}
+  .priority-badge {{ font-size: 0.7rem; border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
+  .priority-high {{ background: rgba(239,68,68,0.15); color: #f87171; }}
+  .priority-medium {{ background: rgba(245,158,11,0.15); color: #fbbf24; }}
+  .priority-low {{ background: rgba(16,185,129,0.15); color: #34d399; }}
+  .due-badge {{ font-size: 0.7rem; color: #94a3b8; background: #1e293b; border-radius: 999px; padding: 0.1rem 0.5rem; }}
+  .due-overdue {{ color: #f87171; background: rgba(239,68,68,0.1); }}
+  .field input[type=date] {{ width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.875rem; padding: 0.5rem 0.625rem; font-family: inherit; color-scheme: dark; }}
+  .field input[type=date]:focus {{ outline: none; border-color: #3b82f6; }}
 </style>
 </head>
 <body>
@@ -597,6 +624,19 @@ fn render_board(cards: &[Card]) -> String {
     <div class="field">
       <label>Tags</label>
       <input id="f-tags" type="text" placeholder="comma-separated">
+    </div>
+    <div class="field">
+      <label>Due Date</label>
+      <input id="f-due" type="date">
+    </div>
+    <div class="field">
+      <label>Priority</label>
+      <select id="f-priority">
+        <option value="">None</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
     </div>
     <div class="field">
       <label>Checklist</label>
@@ -859,6 +899,8 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-status').value = DEFAULT_STATUS;
     document.getElementById('f-owner').value = '';
     document.getElementById('f-tags').value = '';
+    document.getElementById('f-due').value = '';
+    document.getElementById('f-priority').value = '';
     document.getElementById('cl-items').innerHTML = '';
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
@@ -876,6 +918,8 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-status').value = el.dataset.status || DEFAULT_STATUS;
     document.getElementById('f-owner').value = el.dataset.owner || '';
     document.getElementById('f-tags').value = el.dataset.tags || '';
+    document.getElementById('f-due').value = el.dataset.due || '';
+    document.getElementById('f-priority').value = el.dataset.priority || '';
     document.getElementById('cl-items').innerHTML = '';
     const checklist = JSON.parse(el.dataset.checklist || '[]');
     checklist.forEach(item => addChecklistRow(item.text, item.checked));
@@ -902,6 +946,8 @@ fn render_board(cards: &[Card]) -> String {
     const owner = document.getElementById('f-owner').value.trim() || null;
     const tags = document.getElementById('f-tags').value
       .split(',').map(t => t.trim()).filter(Boolean);
+    const due_at = document.getElementById('f-due').value || null;
+    const priority = document.getElementById('f-priority').value || null;
     const checklist = getChecklistFromModal();
 
     let url, method, body;
@@ -910,11 +956,11 @@ fn render_board(cards: &[Card]) -> String {
       if (!name) {{ errorEl.textContent = 'Name is required'; return; }}
       url = '/cards';
       method = 'POST';
-      body = {{ name, description, status, owner, tags, checklist }};
+      body = {{ name, description, status, owner, tags, checklist, due_at, priority }};
     }} else {{
       url = `/cards/${{encodeURIComponent(editCardName)}}`;
       method = 'PATCH';
-      body = {{ description, status, owner, tags, checklist }};
+      body = {{ description, status, owner, tags, checklist, due_at, priority }};
     }}
 
     const btn = document.getElementById('modal-submit');
@@ -1137,6 +1183,24 @@ fn render_card(card: &Card) -> String {
 
     let meta_html: String = {
         let mut parts = Vec::new();
+        if let Some(ref p) = card.priority {
+            let cls = match p.as_str() {
+                "high" => "priority-badge priority-high",
+                "medium" => "priority-badge priority-medium",
+                _ => "priority-badge priority-low",
+            };
+            parts.push(format!(r#"<span class="{}">{}</span>"#, cls, escape_html(p)));
+        }
+        if let Some(due) = card.due_at {
+            let today = chrono::Utc::now().date_naive();
+            let due_date = due.date_naive();
+            let cls = if due_date < today { "due-badge due-overdue" } else { "due-badge" };
+            parts.push(format!(
+                r#"<span class="{}">{}</span>"#,
+                cls,
+                due_date.format("%b %-d")
+            ));
+        }
         if let Some(owner) = &card.owner {
             parts.push(format!(
                 r#"<span class="owner">{}</span>"#,
@@ -1177,6 +1241,8 @@ fn render_card(card: &Card) -> String {
   data-status="{status}"
   data-owner="{owner}"
   data-tags="{tags}"
+  data-due="{due}"
+  data-priority="{priority}"
   data-checklist="[{checklist_json}]"
   onclick="openEdit(this)">
   <div class="card-name">{name_display}</div>
@@ -1187,6 +1253,12 @@ fn render_card(card: &Card) -> String {
         status = escape_html(&card.status),
         owner = escape_html(card.owner.as_deref().unwrap_or("")),
         tags = escape_html(&card.tags.join(",")),
+        due = escape_html(
+            &card.due_at
+                .map(|d| d.date_naive().format("%Y-%m-%d").to_string())
+                .unwrap_or_default()
+        ),
+        priority = escape_html(card.priority.as_deref().unwrap_or("")),
         checklist_json = escape_html(&checklist_json),
         name_display = escape_html(&card.name),
         desc_display = desc_display,
