@@ -119,6 +119,9 @@ pub enum Commands {
         name: String,
     },
 
+    /// Show summary statistics
+    Stats,
+
     /// Initialise a new cardthing project
     Init,
 
