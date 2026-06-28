@@ -119,6 +119,13 @@ pub enum Commands {
         name: String,
     },
 
+    /// Search cards by name, description, or tag
+    #[command(alias = "search")]
+    Find {
+        /// Search query
+        query: String,
+    },
+
     /// Show summary statistics
     Stats,
 

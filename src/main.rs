@@ -74,6 +74,10 @@ fn main() {
             format,
         }) => require_init().and_then(|_| commands::list::execute(status, owner, tag, format)),
 
+        Some(Commands::Find { query }) => {
+            require_init().and_then(|_| commands::find::execute(query))
+        }
+
         Some(Commands::Stats) => require_init().and_then(|_| commands::stats::execute()),
 
         Some(Commands::Shell) | None => require_init().and_then(|_| shell::run()),
