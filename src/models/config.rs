@@ -25,7 +25,10 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { title: default_title(), statuses: default_statuses() }
+        Config {
+            title: default_title(),
+            statuses: default_statuses(),
+        }
     }
 }
 
@@ -69,10 +72,26 @@ impl Config {
 
 fn default_statuses() -> Vec<StatusDef> {
     vec![
-        StatusDef { id: "todo".into(),       label: "Todo".into(),        color: "#f59e0b".into() },
-        StatusDef { id: "inprogress".into(), label: "In Progress".into(), color: "#3b82f6".into() },
-        StatusDef { id: "done".into(),       label: "Done".into(),        color: "#10b981".into() },
-        StatusDef { id: "blocked".into(),    label: "Blocked".into(),     color: "#ef4444".into() },
+        StatusDef {
+            id: "todo".into(),
+            label: "Todo".into(),
+            color: "#f59e0b".into(),
+        },
+        StatusDef {
+            id: "inprogress".into(),
+            label: "In Progress".into(),
+            color: "#3b82f6".into(),
+        },
+        StatusDef {
+            id: "done".into(),
+            label: "Done".into(),
+            color: "#10b981".into(),
+        },
+        StatusDef {
+            id: "blocked".into(),
+            label: "Blocked".into(),
+            color: "#ef4444".into(),
+        },
     ]
 }
 

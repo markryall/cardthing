@@ -22,16 +22,14 @@ pub fn save_card(card: &Card) -> Result<()> {
     let filename = sanitize_filename(&card.name);
     let path = get_cards_path().join(format!("{}.toml", filename));
     let content = toml::to_string_pretty(card)?;
-    fs::write(&path, content)
-        .context(format!("Failed to write card: {}", card.name))?;
+    fs::write(&path, content).context(format!("Failed to write card: {}", card.name))?;
     Ok(())
 }
 
 pub fn load_card(name: &str) -> Result<Card> {
     let filename = sanitize_filename(name);
     let path = get_cards_path().join(format!("{}.toml", filename));
-    let content =
-        fs::read_to_string(&path).context(format!("Card not found: {}", name))?;
+    let content = fs::read_to_string(&path).context(format!("Card not found: {}", name))?;
     let card: Card = toml::from_str(&content)?;
     Ok(card)
 }

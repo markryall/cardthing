@@ -29,7 +29,11 @@ color = "#ef4444"
 
 pub fn execute() -> Result<()> {
     if fs::metadata(CARDS_DIR).is_ok() && fs::metadata(CONFIG_FILE).is_ok() {
-        bail!("Already initialised (found {} and {})", CARDS_DIR, CONFIG_FILE);
+        bail!(
+            "Already initialised (found {} and {})",
+            CARDS_DIR,
+            CONFIG_FILE
+        );
     }
 
     if fs::metadata(CARDS_DIR).is_err() {

@@ -23,8 +23,7 @@ struct AppState {
 }
 
 const COLUMN_COLORS: &[&str] = &[
-    "#f59e0b", "#3b82f6", "#10b981", "#ef4444",
-    "#a855f7", "#f97316", "#06b6d4", "#ec4899",
+    "#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#a855f7", "#f97316", "#06b6d4", "#ec4899",
     "#84cc16", "#14b8a6",
 ];
 
@@ -45,13 +44,25 @@ async fn serve(port: u16) -> Result<()> {
         .route("/", get(board_handler))
         .route("/events", get(sse_handler))
         .route("/cards", axum::routing::post(post_card))
-        .route("/cards/:name/status", axum::routing::patch(patch_card_status))
-        .route("/cards/:name/checklist/:index", axum::routing::patch(toggle_checklist_item))
+        .route(
+            "/cards/:name/status",
+            axum::routing::patch(patch_card_status),
+        )
+        .route(
+            "/cards/:name/checklist/:index",
+            axum::routing::patch(toggle_checklist_item),
+        )
         .route("/cards/:name", axum::routing::patch(patch_card))
         .route("/columns", axum::routing::post(post_column))
         .route("/columns/order", axum::routing::put(put_column_order))
-        .route("/columns/:id", axum::routing::patch(patch_column).delete(delete_column))
-        .route("/columns/:id/cards/order", axum::routing::put(put_column_cards_order))
+        .route(
+            "/columns/:id",
+            axum::routing::patch(patch_column).delete(delete_column),
+        )
+        .route(
+            "/columns/:id/cards/order",
+            axum::routing::put(put_column_cards_order),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -126,12 +137,24 @@ struct ApiResponse {
 }
 
 impl ApiResponse {
-    fn ok() -> Json<Self> { Json(Self { ok: true, error: None }) }
-    fn err(e: impl ToString) -> Json<Self> { Json(Self { ok: false, error: Some(e.to_string()) }) }
+    fn ok() -> Json<Self> {
+        Json(Self {
+            ok: true,
+            error: None,
+        })
+    }
+    fn err(e: impl ToString) -> Json<Self> {
+        Json(Self {
+            ok: false,
+            error: Some(e.to_string()),
+        })
+    }
 }
 
 #[derive(Deserialize)]
-struct StatusUpdate { status: String }
+struct StatusUpdate {
+    status: String,
+}
 
 #[derive(Deserialize)]
 struct ChecklistItemInput {
@@ -175,12 +198,12 @@ async fn patch_card_status(
     }
 }
 
-async fn toggle_checklist_item(
-    Path((name, index)): Path<(String, usize)>,
-) -> Json<ApiResponse> {
+async fn toggle_checklist_item(Path((name, index)): Path<(String, usize)>) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
         let mut card = storage::load_card(&name)?;
-        let item = card.checklist.get_mut(index)
+        let item = card
+            .checklist
+            .get_mut(index)
             .ok_or_else(|| anyhow::anyhow!("Checklist item {} not found", index))?;
         item.checked = !item.checked;
         card.updated_at = Utc::now();
@@ -192,10 +215,7 @@ async fn toggle_checklist_item(
     }
 }
 
-async fn patch_card(
-    Path(name): Path<String>,
-    Json(body): Json<CardUpdate>,
-) -> Json<ApiResponse> {
+async fn patch_card(Path(name): Path<String>, Json(body): Json<CardUpdate>) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
         let config = Config::load();
         let mut card = storage::load_card(&name)?;
@@ -203,9 +223,14 @@ async fn patch_card(
         card.status = config.validate_status(&body.status)?;
         card.owner = body.owner.filter(|o| !o.is_empty());
         card.tags = body.tags;
-        card.checklist = body.checklist.into_iter()
+        card.checklist = body
+            .checklist
+            .into_iter()
             .filter(|i| !i.text.trim().is_empty())
-            .map(|i| ChecklistItem { text: i.text, checked: i.checked })
+            .map(|i| ChecklistItem {
+                text: i.text,
+                checked: i.checked,
+            })
             .collect();
         card.updated_at = Utc::now();
         storage::save_card(&card)
@@ -226,9 +251,14 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
         card.status = config.validate_status(&body.status)?;
         card.owner = body.owner.filter(|o| !o.is_empty());
         card.tags = body.tags;
-        card.checklist = body.checklist.into_iter()
+        card.checklist = body
+            .checklist
+            .into_iter()
             .filter(|i| !i.text.trim().is_empty())
-            .map(|i| ChecklistItem { text: i.text, checked: i.checked })
+            .map(|i| ChecklistItem {
+                text: i.text,
+                checked: i.checked,
+            })
             .collect();
         card.validate()?;
         storage::save_card(&card)
@@ -242,10 +272,14 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
 // ── Column handlers ───────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-struct NewColumnBody { label: String }
+struct NewColumnBody {
+    label: String,
+}
 
 #[derive(Deserialize)]
-struct ColumnUpdate { label: String }
+struct ColumnUpdate {
+    label: String,
+}
 
 async fn post_column(
     State(state): State<Arc<AppState>>,
@@ -253,20 +287,35 @@ async fn post_column(
 ) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
         let label = body.label.trim().to_string();
-        if label.is_empty() { anyhow::bail!("Column name is required"); }
+        if label.is_empty() {
+            anyhow::bail!("Column name is required");
+        }
         let mut config = Config::load();
-        let id: String = label.to_lowercase().replace(' ', "-")
-            .chars().filter(|c| c.is_alphanumeric() || *c == '-').collect();
-        if id.is_empty() { anyhow::bail!("Invalid column name"); }
+        let id: String = label
+            .to_lowercase()
+            .replace(' ', "-")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect();
+        if id.is_empty() {
+            anyhow::bail!("Invalid column name");
+        }
         if config.statuses.iter().any(|s| s.id == id) {
             anyhow::bail!("A column with that name already exists");
         }
         let color = COLUMN_COLORS[config.statuses.len() % COLUMN_COLORS.len()].to_string();
-        config.statuses.push(crate::models::StatusDef { id, label, color });
+        config
+            .statuses
+            .push(crate::models::StatusDef { id, label, color });
         config.save()
     })();
-    if result.is_ok() { let _ = state.tx.send(()); }
-    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+    if result.is_ok() {
+        let _ = state.tx.send(());
+    }
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
 }
 
 async fn patch_column(
@@ -276,23 +325,33 @@ async fn patch_column(
 ) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
         let label = body.label.trim().to_string();
-        if label.is_empty() { anyhow::bail!("Column name is required"); }
+        if label.is_empty() {
+            anyhow::bail!("Column name is required");
+        }
         let mut config = Config::load();
-        let status = config.statuses.iter_mut().find(|s| s.id == id)
+        let status = config
+            .statuses
+            .iter_mut()
+            .find(|s| s.id == id)
             .ok_or_else(|| anyhow::anyhow!("Column '{}' not found", id))?;
         status.label = label;
         config.save()
     })();
-    if result.is_ok() { let _ = state.tx.send(()); }
-    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+    if result.is_ok() {
+        let _ = state.tx.send(());
+    }
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
 }
 
 #[derive(Deserialize)]
-struct ColumnOrder { order: Vec<String> }
+struct ColumnOrder {
+    order: Vec<String>,
+}
 
-async fn put_column_order(
-    Json(body): Json<ColumnOrder>,
-) -> Json<ApiResponse> {
+async fn put_column_order(Json(body): Json<ColumnOrder>) -> Json<ApiResponse> {
     let result = (|| -> anyhow::Result<()> {
         let mut config = Config::load();
         if body.order.len() != config.statuses.len() {
@@ -300,7 +359,10 @@ async fn put_column_order(
         }
         let mut reordered = Vec::with_capacity(config.statuses.len());
         for id in &body.order {
-            let status = config.statuses.iter().find(|s| &s.id == id)
+            let status = config
+                .statuses
+                .iter()
+                .find(|s| &s.id == id)
                 .ok_or_else(|| anyhow::anyhow!("Unknown column '{}'", id))?
                 .clone();
             reordered.push(status);
@@ -308,11 +370,16 @@ async fn put_column_order(
         config.statuses = reordered;
         config.save()
     })();
-    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
 }
 
 #[derive(Deserialize)]
-struct ColumnCardsOrder { names: Vec<String> }
+struct ColumnCardsOrder {
+    names: Vec<String>,
+}
 
 async fn put_column_cards_order(
     Path(id): Path<String>,
@@ -330,7 +397,10 @@ async fn put_column_cards_order(
         }
         Ok(())
     })();
-    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
 }
 
 async fn delete_column(
@@ -351,8 +421,13 @@ async fn delete_column(
         }
         config.save()
     })();
-    if result.is_ok() { let _ = state.tx.send(()); }
-    match result { Ok(_) => ApiResponse::ok(), Err(e) => ApiResponse::err(e) }
+    if result.is_ok() {
+        let _ = state.tx.send(());
+    }
+    match result {
+        Ok(_) => ApiResponse::ok(),
+        Err(e) => ApiResponse::err(e),
+    }
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -377,14 +452,21 @@ fn render_board(cards: &[Card]) -> String {
     let status_options: String = config
         .statuses
         .iter()
-        .map(|s| format!(
-            r#"<option value="{}">{}</option>"#,
-            escape_html(&s.id), escape_html(&s.label)
-        ))
+        .map(|s| {
+            format!(
+                r#"<option value="{}">{}</option>"#,
+                escape_html(&s.id),
+                escape_html(&s.label)
+            )
+        })
         .collect();
 
     let default_status = escape_html(
-        config.statuses.first().map(|s| s.id.as_str()).unwrap_or("todo"),
+        config
+            .statuses
+            .first()
+            .map(|s| s.id.as_str())
+            .unwrap_or("todo"),
     );
     let title = escape_html(&config.title);
 
@@ -1012,7 +1094,10 @@ fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> 
 
     let label_json = serde_json::to_string(label).unwrap_or_default();
     let del_btn = if cards.is_empty() {
-        format!(r#"<button class="btn-col-del" onclick="deleteColumn('{}')" title="Delete">&#x2715;</button>"#, escape_html(status_id))
+        format!(
+            r#"<button class="btn-col-del" onclick="deleteColumn('{}')" title="Delete">&#x2715;</button>"#,
+            escape_html(status_id)
+        )
     } else {
         String::new()
     };
@@ -1053,7 +1138,10 @@ fn render_card(card: &Card) -> String {
     let meta_html: String = {
         let mut parts = Vec::new();
         if let Some(owner) = &card.owner {
-            parts.push(format!(r#"<span class="owner">{}</span>"#, escape_html(owner)));
+            parts.push(format!(
+                r#"<span class="owner">{}</span>"#,
+                escape_html(owner)
+            ));
         }
         for tag in &card.tags {
             parts.push(format!(r#"<span class="tag">{}</span>"#, escape_html(tag)));
@@ -1069,12 +1157,16 @@ fn render_card(card: &Card) -> String {
 
     let checklist_html = render_card_checklist(card);
 
-    let checklist_json = card.checklist.iter()
-        .map(|i| format!(
-            r#"{{"text":{},"checked":{}}}"#,
-            serde_json::to_string(&i.text).unwrap_or_default(),
-            i.checked
-        ))
+    let checklist_json = card
+        .checklist
+        .iter()
+        .map(|i| {
+            format!(
+                r#"{{"text":{},"checked":{}}}"#,
+                serde_json::to_string(&i.text).unwrap_or_default(),
+                i.checked
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
 

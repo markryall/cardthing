@@ -23,7 +23,8 @@ fn main() {
             status,
             owner,
             tags,
-        }) => require_init().and_then(|_| commands::add::execute(name, description, status, owner, tags)),
+        }) => require_init()
+            .and_then(|_| commands::add::execute(name, description, status, owner, tags)),
 
         Some(Commands::Edit {
             name,
@@ -32,7 +33,9 @@ fn main() {
             owner,
             add_tags,
             remove_tags,
-        }) => require_init().and_then(|_| commands::edit::execute(name, description, status, owner, add_tags, remove_tags)),
+        }) => require_init().and_then(|_| {
+            commands::edit::execute(name, description, status, owner, add_tags, remove_tags)
+        }),
 
         Some(Commands::List {
             status,
@@ -41,11 +44,11 @@ fn main() {
             format,
         }) => require_init().and_then(|_| commands::list::execute(status, owner, tag, format)),
 
-        Some(Commands::Shell) | None => {
-            require_init().and_then(|_| shell::run())
-        }
+        Some(Commands::Shell) | None => require_init().and_then(|_| shell::run()),
 
-        Some(Commands::Serve { port }) => require_init().and_then(|_| commands::serve::execute(port)),
+        Some(Commands::Serve { port }) => {
+            require_init().and_then(|_| commands::serve::execute(port))
+        }
     };
 
     if let Err(e) = result {

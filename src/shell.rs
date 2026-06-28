@@ -49,7 +49,10 @@ pub fn run() -> Result<()> {
                     "edit" => handle_edit(&parts[1..], &current_card),
                     "rm" | "delete" => handle_delete(&parts[1..]),
                     _ => {
-                        eprintln!("Unknown command: '{}'. Type 'help' for available commands.", parts[0]);
+                        eprintln!(
+                            "Unknown command: '{}'. Type 'help' for available commands.",
+                            parts[0]
+                        );
                         Ok(())
                     }
                 };
@@ -83,13 +86,34 @@ pub fn run() -> Result<()> {
 
 fn print_help() {
     println!("\nAvailable commands:");
-    println!("  {}  <name> [description]     Create a new card", "touch".cyan());
-    println!("  {}  [--status <s>] [--owner <o>]  List all cards", "ls".cyan());
-    println!("  {}     <card>                    Enter card context", "cd".cyan());
-    println!("  {}    <field> <value>           Set a field (in card context)", "set".cyan());
-    println!("  {}   [card] <field> <value>    Edit a card field", "edit".cyan());
-    println!("  {}     <card>                    Delete a card", "rm".cyan());
-    println!("  {}                           Show this help", "help".cyan());
+    println!(
+        "  {}  <name> [description]     Create a new card",
+        "touch".cyan()
+    );
+    println!(
+        "  {}  [--status <s>] [--owner <o>]  List all cards",
+        "ls".cyan()
+    );
+    println!(
+        "  {}     <card>                    Enter card context",
+        "cd".cyan()
+    );
+    println!(
+        "  {}    <field> <value>           Set a field (in card context)",
+        "set".cyan()
+    );
+    println!(
+        "  {}   [card] <field> <value>    Edit a card field",
+        "edit".cyan()
+    );
+    println!(
+        "  {}     <card>                    Delete a card",
+        "rm".cyan()
+    );
+    println!(
+        "  {}                           Show this help",
+        "help".cyan()
+    );
     println!("  {}                           Exit shell\n", "exit".cyan());
 }
 
@@ -177,7 +201,9 @@ fn handle_cd(args: &[&str], current_card: &mut Option<String>) -> Result<()> {
 fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
     let card_name = match current_card {
         Some(name) => name.clone(),
-        None => bail!("Not in card context. Use 'cd <card>' first or use 'edit <card> <field> <value>'"),
+        None => {
+            bail!("Not in card context. Use 'cd <card>' first or use 'edit <card> <field> <value>'")
+        }
     };
 
     if args.len() < 2 {
@@ -188,37 +214,15 @@ fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
     let value = args[1..].join(" ");
 
     match field {
-        "status" => {
-            commands::edit::execute(
-                card_name,
-                None,
-                Some(value),
-                None,
-                vec![],
-                vec![],
-            )
-        }
-        "owner" => {
-            commands::edit::execute(
-                card_name,
-                None,
-                None,
-                Some(value),
-                vec![],
-                vec![],
-            )
-        }
+        "status" => commands::edit::execute(card_name, None, Some(value), None, vec![], vec![]),
+        "owner" => commands::edit::execute(card_name, None, None, Some(value), vec![], vec![]),
         "description" | "desc" => {
-            commands::edit::execute(
-                card_name,
-                Some(value),
-                None,
-                None,
-                vec![],
-                vec![],
-            )
+            commands::edit::execute(card_name, Some(value), None, None, vec![], vec![])
         }
-        _ => bail!("Unknown field: '{}'. Valid fields: status, owner, description", field),
+        _ => bail!(
+            "Unknown field: '{}'. Valid fields: status, owner, description",
+            field
+        ),
     }
 }
 
@@ -232,11 +236,7 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
         if args.len() < 2 {
             bail!("Usage: edit <field> <value>");
         }
-        (
-            current_card.clone().unwrap(),
-            args[0],
-            args[1..].join(" "),
-        )
+        (current_card.clone().unwrap(), args[0], args[1..].join(" "))
     } else {
         if args.len() < 3 {
             bail!("Usage: edit <card> <field> <value>");
@@ -245,37 +245,15 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
     };
 
     match field {
-        "status" => {
-            commands::edit::execute(
-                card_name,
-                None,
-                Some(value),
-                None,
-                vec![],
-                vec![],
-            )
-        }
-        "owner" => {
-            commands::edit::execute(
-                card_name,
-                None,
-                None,
-                Some(value),
-                vec![],
-                vec![],
-            )
-        }
+        "status" => commands::edit::execute(card_name, None, Some(value), None, vec![], vec![]),
+        "owner" => commands::edit::execute(card_name, None, None, Some(value), vec![], vec![]),
         "description" | "desc" => {
-            commands::edit::execute(
-                card_name,
-                Some(value),
-                None,
-                None,
-                vec![],
-                vec![],
-            )
+            commands::edit::execute(card_name, Some(value), None, None, vec![], vec![])
         }
-        _ => bail!("Unknown field: '{}'. Valid fields: status, owner, description", field),
+        _ => bail!(
+            "Unknown field: '{}'. Valid fields: status, owner, description",
+            field
+        ),
     }
 }
 
