@@ -12,7 +12,11 @@ A simple, fast command-line tool for managing task cards, written in Rust. A spi
 - **Multiple output formats**: Table view or JSON export
 - **Colored output**: Visual status indicators (Todo=Yellow, InProgress=Blue, Done=Green, Blocked=Red)
 - **Web board**: Kanban view with drag-and-drop, live reload, keyboard navigation, and column management
-- **Checklists**: Per-card checklist items with progress tracking
+- **Checklists**: Per-card checklist items with progress tracking, manageable from CLI or web
+- **Due dates**: Optional due date per card (`--due YYYY-MM-DD`)
+- **Priority**: Optional priority field (high, medium, low) with color coding
+- **Search**: Full-text search across card names, descriptions, and tags
+- **Stats**: Summary counts by status, priority, and owner
 
 ## Installation
 
@@ -47,15 +51,23 @@ Perfect for scripting and quick operations:
 # Add a new card
 cardthing add "Fix login bug" --description "Users can't log in" --status todo
 
-# Add a card with owner and tags
+# Add a card with owner, tags, due date, and priority
 cardthing add "Implement feature X" \
   --description "Add new feature" \
   --status inprogress \
   --owner Alice \
-  --tags feature,high-priority
+  --tags feature,high-priority \
+  --due 2026-07-15 \
+  --priority high
 
 # Edit a card
 cardthing edit "Fix login bug" --status inprogress --owner Bob
+
+# Set a due date and priority
+cardthing edit "Fix login bug" --due 2026-07-01 --priority medium
+
+# Clear a due date
+cardthing edit "Fix login bug" --clear-due
 
 # List all cards
 cardthing list
@@ -71,6 +83,26 @@ cardthing list --tag high-priority
 
 # Output as JSON
 cardthing list --format json
+
+# Show full details of a card (description, checklist, due date, priority)
+cardthing show "Fix login bug"
+
+# Search cards by name, description, or tag
+cardthing find "login"
+cardthing search "auth"   # alias
+
+# Show stats (counts by status, priority, owner)
+cardthing stats
+
+# Delete a card
+cardthing rm "Fix login bug"
+cardthing delete "Fix login bug"  # alias
+
+# Manage checklist items
+cardthing checklist "Fix login bug" add "Reproduce the issue"
+cardthing checklist "Fix login bug" add "Write a failing test"
+cardthing checklist "Fix login bug" toggle 1   # toggle item 1 checked/unchecked
+cardthing checklist "Fix login bug" remove 2   # remove item 2 (1-based index)
 ```
 
 ### Shell Mode (Interactive REPL)
@@ -168,12 +200,15 @@ Inside the edit modal, checklist items support `Enter` to add a new item below, 
 Each card contains:
 
 - **name**: Unique identifier for the card
-- **status**: One of `todo`, `inprogress`, `done`, `blocked`
+- **status**: One of `todo`, `inprogress`, `done`, `blocked` (configurable via `.cards.toml`)
 - **owner**: Optional assignee (can be any string)
 - **description**: Card details
 - **created_at**: Timestamp when card was created
 - **updated_at**: Timestamp of last modification
 - **tags**: Array of tags for categorization
+- **priority**: Optional priority — `high`, `medium`, or `low`
+- **due_at**: Optional due date (ISO 8601)
+- **checklist**: Optional list of checklist items, each with text and checked state
 
 ## Storage
 
@@ -185,9 +220,19 @@ name = "Fix login bug"
 status = "inprogress"
 owner = "Bob"
 description = "Users can't log in"
+priority = "high"
+due_at = "2026-07-01T00:00:00Z"
 created_at = "2025-12-23T02:26:43.056620Z"
 updated_at = "2025-12-23T02:27:03.457657Z"
 tags = ["bug", "critical"]
+
+[[checklist]]
+text = "Reproduce the issue"
+checked = true
+
+[[checklist]]
+text = "Write a failing test"
+checked = false
 ```
 
 Files are named using a sanitized version of the card name (lowercase, spaces to hyphens, special characters removed).
