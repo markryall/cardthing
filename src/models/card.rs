@@ -25,6 +25,8 @@ pub struct Card {
     pub order: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
 }
 
 impl Card {
@@ -41,6 +43,7 @@ impl Card {
             checklist: Vec::new(),
             order: None,
             due_at: None,
+            priority: None,
         }
     }
 

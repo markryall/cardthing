@@ -21,6 +21,15 @@ pub fn execute(name: String) -> Result<()> {
     println!("  Created: {}", card.created_at.format("%Y-%m-%d %H:%M UTC"));
     println!("  Updated: {}", card.updated_at.format("%Y-%m-%d %H:%M UTC"));
 
+    if let Some(ref p) = card.priority {
+        let colored_priority = match p.as_str() {
+            "high" => p.red(),
+            "medium" => p.yellow(),
+            _ => p.green(),
+        };
+        println!("  Priority:{}", colored_priority);
+    }
+
     if let Some(due) = card.due_at {
         println!("  Due:     {}", due.format("%Y-%m-%d"));
     }

@@ -35,6 +35,10 @@ pub enum Commands {
         /// Due date (YYYY-MM-DD)
         #[arg(long)]
         due: Option<String>,
+
+        /// Priority (high, medium, low)
+        #[arg(long)]
+        priority: Option<String>,
     },
 
     /// Edit an existing card
@@ -69,6 +73,10 @@ pub enum Commands {
         /// Clear the due date
         #[arg(long)]
         clear_due: bool,
+
+        /// Priority (high, medium, low)
+        #[arg(long)]
+        priority: Option<String>,
     },
 
     /// List all cards

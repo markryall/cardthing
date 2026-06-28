@@ -1,4 +1,4 @@
-use crate::commands::parse_due_date;
+use crate::commands::{parse_due_date, validate_priority};
 use crate::models::Config;
 use crate::storage;
 use anyhow::{bail, Result};
@@ -14,6 +14,7 @@ pub fn execute(
     remove_tags: Vec<String>,
     due: Option<String>,
     clear_due: bool,
+    priority: Option<String>,
 ) -> Result<()> {
     let mut card = storage::load_card(&name)?;
     let mut changes = Vec::new();
@@ -60,6 +61,12 @@ pub fn execute(
     } else if let Some(d) = due {
         card.due_at = Some(parse_due_date(&d)?);
         changes.push(format!("due date to '{}'", d));
+    }
+
+    if let Some(p) = priority {
+        let validated = validate_priority(&p)?;
+        changes.push(format!("priority to '{}'", validated));
+        card.priority = Some(validated);
     }
 
     if changes.is_empty() {
