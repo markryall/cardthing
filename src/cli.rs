@@ -98,6 +98,14 @@ pub enum Commands {
         format: String,
     },
 
+    /// Manage checklist items on a card
+    Checklist {
+        /// Name of the card
+        name: String,
+        #[command(subcommand)]
+        action: ChecklistAction,
+    },
+
     /// Delete a card
     #[command(alias = "delete")]
     Rm {
@@ -122,5 +130,24 @@ pub enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value = "3000")]
         port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ChecklistAction {
+    /// Add a new checklist item
+    Add {
+        /// Text of the item
+        text: String,
+    },
+    /// Toggle a checklist item checked/unchecked (1-based index)
+    Toggle {
+        /// Item number (from `cardthing show`)
+        index: usize,
+    },
+    /// Remove a checklist item (1-based index)
+    Remove {
+        /// Item number (from `cardthing show`)
+        index: usize,
     },
 }

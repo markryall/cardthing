@@ -1,4 +1,4 @@
-use cardthing::cli::{Cli, Commands};
+use cardthing::cli::{ChecklistAction, Cli, Commands};
 use cardthing::commands;
 use cardthing::shell;
 use clap::Parser;
@@ -51,6 +51,12 @@ fn main() {
                 clear_due,
                 priority,
             )
+        }),
+
+        Some(Commands::Checklist { name, action }) => require_init().and_then(|_| match action {
+            ChecklistAction::Add { text } => commands::checklist::add(name, text),
+            ChecklistAction::Toggle { index } => commands::checklist::toggle(name, index),
+            ChecklistAction::Remove { index } => commands::checklist::remove(name, index),
         }),
 
         Some(Commands::Rm { name }) => {
