@@ -28,9 +28,19 @@ const ANIMALS: &[&str] = &[
     "fennec", "manatee", "ocelot", "pangolin", "toucan", "wombat", "ibis",
 ];
 
-pub fn execute(profile: String, max_cards: Option<u32>, agent_cmd: Option<String>) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+pub fn execute(
+    profile: String,
+    max_cards: Option<u32>,
+    watch: Option<String>,
+    done: Option<String>,
+    prompt_file: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    agent_cmd: Option<String>,
+) -> Result<()> {
     let config = Config::load();
-    let worker = config
+    let mut worker = config
         .find_worker(&profile)
         .with_context(|| {
             let known: Vec<&str> = config.workers.iter().map(|w| w.name.as_str()).collect();
@@ -45,6 +55,8 @@ pub fn execute(profile: String, max_cards: Option<u32>, agent_cmd: Option<String
             }
         })?
         .clone();
+
+    apply_overrides(&mut worker, watch, done, prompt_file, model, effort);
 
     config.validate_status(&worker.watch)?;
     config.validate_status(&worker.done)?;
@@ -154,6 +166,35 @@ fn spawn_change_watcher() -> (Option<RecommendedWatcher>, mpsc::Receiver<()>) {
     });
 
     (Some(watcher), rx)
+}
+
+/// Apply CLI-provided per-field overrides on top of a worker profile loaded
+/// from .cards.toml. Setting prompt_file also clears prompt so the two
+/// remain mutually exclusive (load_system_prompt rejects both being set).
+fn apply_overrides(
+    worker: &mut WorkerProfile,
+    watch: Option<String>,
+    done: Option<String>,
+    prompt_file: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+) {
+    if let Some(watch) = watch {
+        worker.watch = watch;
+    }
+    if let Some(done) = done {
+        worker.done = done;
+    }
+    if let Some(prompt_file) = prompt_file {
+        worker.prompt = None;
+        worker.prompt_file = Some(prompt_file);
+    }
+    if let Some(model) = model {
+        worker.model = Some(model);
+    }
+    if let Some(effort) = effort {
+        worker.effort = Some(effort);
+    }
 }
 
 fn log(worker_name: &str, message: &str) {
@@ -654,6 +695,46 @@ mod tests {
             poll_seconds: None,
             workspace: false,
         }
+    }
+
+    #[test]
+    fn test_apply_overrides_leaves_profile_untouched_when_all_none() {
+        let mut worker = test_worker();
+        let original = worker.clone();
+        apply_overrides(&mut worker, None, None, None, None, None);
+        assert_eq!(worker.watch, original.watch);
+        assert_eq!(worker.done, original.done);
+        assert_eq!(worker.prompt, original.prompt);
+        assert_eq!(worker.prompt_file, original.prompt_file);
+        assert_eq!(worker.model, original.model);
+        assert_eq!(worker.effort, original.effort);
+    }
+
+    #[test]
+    fn test_apply_overrides_overrides_each_field() {
+        let mut worker = test_worker();
+        apply_overrides(
+            &mut worker,
+            Some("watching".into()),
+            Some("finished".into()),
+            Some("prompt.txt".into()),
+            Some("opus".into()),
+            Some("high".into()),
+        );
+        assert_eq!(worker.watch, "watching");
+        assert_eq!(worker.done, "finished");
+        assert_eq!(worker.prompt_file, Some("prompt.txt".into()));
+        assert_eq!(worker.model, Some("opus".into()));
+        assert_eq!(worker.effort, Some("high".into()));
+    }
+
+    #[test]
+    fn test_apply_overrides_prompt_file_clears_prompt() {
+        let mut worker = test_worker();
+        assert!(worker.prompt.is_some());
+        apply_overrides(&mut worker, None, None, Some("prompt.txt".into()), None, None);
+        assert_eq!(worker.prompt, None);
+        assert_eq!(worker.prompt_file, Some("prompt.txt".into()));
     }
 
     #[test]

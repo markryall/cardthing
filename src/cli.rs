@@ -163,6 +163,26 @@ pub enum Commands {
         #[arg(long)]
         max_cards: Option<u32>,
 
+        /// Override the profile's watch status
+        #[arg(long)]
+        watch: Option<String>,
+
+        /// Override the profile's done status
+        #[arg(long)]
+        done: Option<String>,
+
+        /// Override the profile's prompt_file
+        #[arg(long)]
+        prompt_file: Option<String>,
+
+        /// Override the profile's model
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Override the profile's effort
+        #[arg(long)]
+        effort: Option<String>,
+
         /// Override the agent executable (testing)
         #[arg(long, hide = true)]
         agent_cmd: Option<String>,

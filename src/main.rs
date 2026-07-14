@@ -95,8 +95,24 @@ fn main() {
         Some(Commands::Work {
             profile,
             max_cards,
+            watch,
+            done,
+            prompt_file,
+            model,
+            effort,
             agent_cmd,
-        }) => require_init().and_then(|_| commands::work::execute(profile, max_cards, agent_cmd)),
+        }) => require_init().and_then(|_| {
+            commands::work::execute(
+                profile,
+                max_cards,
+                watch,
+                done,
+                prompt_file,
+                model,
+                effort,
+                agent_cmd,
+            )
+        }),
     };
 
     if let Err(e) = result {
