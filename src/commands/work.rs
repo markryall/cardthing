@@ -3,13 +3,20 @@ use crate::storage;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use colored::Colorize;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
 const POLL_SECONDS: u64 = 15;
+
+/// How often we poll a running agent child process for exit / kill requests.
+const CHILD_POLL_MILLIS: u64 = 150;
 
 const ADJECTIVES: &[&str] = &[
     "sparkly", "glittery", "sassy", "fierce", "dazzling", "velvet", "cosmic", "peachy", "snazzy",
@@ -56,13 +63,52 @@ pub fn execute(profile: String, max_cards: Option<u32>, agent_cmd: Option<String
         worker.done,
     );
 
+    let poll_seconds = worker.poll_seconds.unwrap_or(POLL_SECONDS);
+    let (_watcher, watch_rx) = spawn_change_watcher();
+
+    // sigint_count tracks how many Ctrl-C presses we've seen:
+    //   0 = normal operation
+    //   1 = graceful shutdown requested (finish current card, then stop)
+    //   2+ = force shutdown requested (kill the running agent, if any)
+    // in_progress tracks whether a card is currently being worked on; if
+    // Ctrl-C arrives while idle we exit immediately.
+    let sigint_count = Arc::new(AtomicUsize::new(0));
+    let in_progress = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let sigint_count = sigint_count.clone();
+        let in_progress = in_progress.clone();
+        let handler_name = name.clone();
+        ctrlc::set_handler(move || {
+            let count = sigint_count.fetch_add(1, Ordering::SeqCst) + 1;
+            if !in_progress.load(Ordering::SeqCst) {
+                log(&handler_name, "idle, exiting immediately");
+                std::process::exit(0);
+            }
+            if count == 1 {
+                log(
+                    &handler_name,
+                    "finishing current card, then exiting (press Ctrl-C again to force stop)",
+                );
+            } else {
+                log(&handler_name, "force stop requested, killing agent process");
+            }
+        })
+        .context("failed to install Ctrl-C handler")?;
+    }
+
     let mut processed: u32 = 0;
     loop {
         if let Some(card) = next_unallocated(&worker.watch)? {
             if let Some(card) = claim(&card.name, &worker.watch, &name)? {
                 log(&name, &format!("claimed '{}'", card.name));
-                process_card(&card, &worker, &name, &agent, &system_prompt)?;
+                in_progress.store(true, Ordering::SeqCst);
+                process_card(&card, &worker, &name, &agent, &system_prompt, &sigint_count)?;
+                in_progress.store(false, Ordering::SeqCst);
                 processed += 1;
+                if sigint_count.load(Ordering::SeqCst) >= 1 {
+                    log(&name, "shutting down after Ctrl-C");
+                    return Ok(());
+                }
                 if let Some(max) = max_cards {
                     if processed >= max {
                         log(&name, &format!("processed {} card(s), exiting", processed));
@@ -72,8 +118,42 @@ pub fn execute(profile: String, max_cards: Option<u32>, agent_cmd: Option<String
                 continue; // look for the next card immediately
             }
         }
-        thread::sleep(Duration::from_secs(POLL_SECONDS));
+        // Wake early on a .cards/ change; otherwise fall back to polling.
+        let _ = watch_rx.recv_timeout(Duration::from_secs(poll_seconds));
     }
+}
+
+/// Watch the .cards/ directory for changes, debouncing bursts of events into
+/// a single notification. Returns the watcher (which must be kept alive for
+/// as long as watching is desired) and a receiver that is notified on
+/// change. If the watcher cannot be set up, the receiver simply never fires
+/// and callers fall back to polling.
+fn spawn_change_watcher() -> (Option<RecommendedWatcher>, mpsc::Receiver<()>) {
+    let (tx, rx) = mpsc::channel::<()>();
+
+    let (stx, srx) = mpsc::channel::<notify::Result<notify::Event>>();
+    let watcher = match RecommendedWatcher::new(stx, notify::Config::default()) {
+        Ok(w) => w,
+        Err(_) => return (None, rx),
+    };
+
+    let mut watcher = watcher;
+    if watcher
+        .watch(Path::new(".cards"), RecursiveMode::NonRecursive)
+        .is_err()
+    {
+        return (None, rx);
+    }
+
+    thread::spawn(move || {
+        while let Ok(Ok(_)) = srx.recv() {
+            thread::sleep(Duration::from_millis(50));
+            while srx.try_recv().is_ok() {}
+            let _ = tx.send(());
+        }
+    });
+
+    (Some(watcher), rx)
 }
 
 fn log(worker_name: &str, message: &str) {
@@ -208,6 +288,7 @@ fn process_card(
     worker_name: &str,
     agent: &str,
     system_prompt: &str,
+    sigint_count: &AtomicUsize,
 ) -> Result<()> {
     let mut cmd = Command::new(agent);
     cmd.arg("-p").arg("--system-prompt").arg(system_prompt);
@@ -224,22 +305,66 @@ fn process_card(
         cmd.arg("--effort").arg(effort);
     }
     cmd.arg(task_prompt(card, worker, worker_name));
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 
     log(worker_name, &format!("running agent on '{}'", card.name));
-    let output = cmd.output();
 
-    let (agent_text, failure): (String, Option<String>) = match output {
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            let mut text = stdout;
-            if !stderr.is_empty() {
-                text.push_str(&format!("\n\n[stderr]\n{}", stderr));
+    let (agent_text, failure): (String, Option<String>) = match cmd.spawn() {
+        Ok(mut child) => {
+            let stdout_pipe = child.stdout.take();
+            let stderr_pipe = child.stderr.take();
+            let stdout_handle = thread::spawn(move || {
+                let mut buf = String::new();
+                if let Some(mut pipe) = stdout_pipe {
+                    let _ = pipe.read_to_string(&mut buf);
+                }
+                buf
+            });
+            let stderr_handle = thread::spawn(move || {
+                let mut buf = String::new();
+                if let Some(mut pipe) = stderr_pipe {
+                    let _ = pipe.read_to_string(&mut buf);
+                }
+                buf
+            });
+
+            // Poll rather than block so a second Ctrl-C can kill the child
+            // instead of waiting for it to finish on its own.
+            let mut killed = false;
+            let status = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Some(status),
+                    Ok(None) => {
+                        if !killed && sigint_count.load(Ordering::SeqCst) >= 2 {
+                            log(worker_name, "force-stopping agent process");
+                            let _ = child.kill();
+                            killed = true;
+                        }
+                        thread::sleep(Duration::from_millis(CHILD_POLL_MILLIS));
+                    }
+                    Err(_) => break None,
+                }
+            };
+
+            let stdout = stdout_handle.join().unwrap_or_default();
+            let stderr = stderr_handle.join().unwrap_or_default();
+            let mut text = stdout.trim().to_string();
+            if !stderr.trim().is_empty() {
+                text.push_str(&format!("\n\n[stderr]\n{}", stderr.trim()));
             }
-            if o.status.success() {
-                (text, None)
+
+            if killed {
+                (
+                    text,
+                    Some("cancelled: worker force-stopped after a second Ctrl-C".to_string()),
+                )
             } else {
-                (text, Some(format!("agent exited with {}", o.status)))
+                match status {
+                    Some(s) if s.success() => (text, None),
+                    Some(s) => (text, Some(format!("agent exited with {}", s))),
+                    None => (text, Some("failed to wait for agent process".to_string())),
+                }
             }
         }
         Err(e) => (String::new(), Some(format!("failed to launch agent: {}", e))),
@@ -328,6 +453,7 @@ mod tests {
             model: None,
             effort: None,
             allowed_tools: Vec::new(),
+            poll_seconds: None,
         }
     }
 

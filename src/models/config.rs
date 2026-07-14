@@ -32,6 +32,10 @@ pub struct WorkerProfile {
     /// Defaults to just enough to move the card: Bash(cardthing:*)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
+    /// Fallback poll interval in seconds, used in case filesystem change
+    /// notifications are missed or unavailable. Defaults to 15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +125,34 @@ fn default_statuses() -> Vec<StatusDef> {
             color: "#ef4444".into(),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worker_profile_poll_seconds_defaults_to_none() {
+        let toml_str = r#"
+            name = "test"
+            watch = "todo"
+            done = "done"
+        "#;
+        let worker: WorkerProfile = toml::from_str(toml_str).unwrap();
+        assert_eq!(worker.poll_seconds, None);
+    }
+
+    #[test]
+    fn test_worker_profile_poll_seconds_parses_when_set() {
+        let toml_str = r#"
+            name = "test"
+            watch = "todo"
+            done = "done"
+            poll_seconds = 5
+        "#;
+        let worker: WorkerProfile = toml::from_str(toml_str).unwrap();
+        assert_eq!(worker.poll_seconds, Some(5));
+    }
 }
 
 fn parse_hex_color(hex: &str) -> Option<Color> {

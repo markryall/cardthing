@@ -1,6 +1,19 @@
 name = "worker reacts to file changes"
-status = "todo"
-description = "Use the notify crate (see the watcher pattern in src/commands/serve.rs around line 83) so 'cardthing work' wakes up when .cards/ changes instead of only polling every 15 seconds. Keep the poll as a fallback and make the interval configurable via an optional poll_seconds field on the worker profile (src/models/config.rs)."
+status = "done"
+description = """
+Use the notify crate (see the watcher pattern in src/commands/serve.rs around line 83) so 'cardthing work' wakes up when .cards/ changes instead of only polling every 15 seconds. Keep the poll as a fallback and make the interval configurable via an optional poll_seconds field on the worker profile (src/models/config.rs).
+
+## Agent: sassy-wombat-93 (2026-07-14 03:01 UTC)
+
+Okay girl, done and dusted! 💅✨
+
+Here's the tea on what I did:
+
+- **`src/models/config.rs`**: added an optional `poll_seconds: Option<u64>` field to `WorkerProfile` (serde-skipped when `None`, so old `.cards.toml` files don't need touching). Added two tests confirming it defaults to `None` and parses correctly when set.
+- **`src/commands/work.rs`**: added `spawn_change_watcher()`, mirroring the `notify` watcher pattern from `serve.rs` — it watches `.cards` non-recursively, debounces bursts of fs events (50ms), and forwards a single "something changed" ping over an `mpsc::Receiver<()>`. The main loop now does `watch_rx.recv_timeout(Duration::from_secs(poll_seconds))` instead of a blind `thread::sleep`, so the worker wakes up immediately on a card change but still falls back to polling (default 15s, or `worker.poll_seconds` if configured) if the watcher can't be set up or nothing fires. If the watcher fails to initialize, it just returns `None` and the loop silently degrades to pure polling — no crash, no drama.
+- Updated the `test_worker()` fixture with the new field.
+
+Ran `cargo build` (clean) and `cargo test` (13 unit + 19 integration tests, all green ✅). Card's flipped to `done`, owner untouched. Xoxo 💋"""
 created_at = "2026-07-13T23:23:11.670103Z"
-updated_at = "2026-07-13T23:56:05.798697Z"
+updated_at = "2026-07-14T03:01:50.828565Z"
 tags = ["dogfood"]
