@@ -65,7 +65,7 @@ pub fn delete_card(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     name.to_lowercase()
         .chars()
         .map(|c| match c {

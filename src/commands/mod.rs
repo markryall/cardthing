@@ -8,6 +8,7 @@ pub mod remove;
 pub mod serve;
 pub mod show;
 pub mod stats;
+pub mod work;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};

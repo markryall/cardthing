@@ -195,6 +195,39 @@ Open `http://localhost:3000` in your browser to see a kanban board organized by 
 
 Inside the edit modal, checklist items support `Enter` to add a new item below, `Backspace` on an empty item to delete it, `Ctrl+Space` to toggle checked, and arrow keys to move between items.
 
+### Worker Mode (Agent Automation)
+
+`cardthing work <profile>` runs a long-lived loop that polls a column for unowned cards, hands each one to a coding agent (e.g. `claude`), and moves it forward when the agent finishes:
+
+```bash
+cardthing work implement
+# process at most 3 cards then exit
+cardthing work implement --max-cards 3
+```
+
+Worker behaviour is defined by `[[workers]]` profiles in `.cards.toml`:
+
+```toml
+[[workers]]
+name = "implement"          # profile name passed to `cardthing work <name>`
+watch = "todo"              # status to poll for unowned, non-flagged cards
+done = "done"                # status the agent should set when finished
+prompt = "Implement the card."       # inline system prompt ...
+prompt_file = ".cards/prompts/implement.md"  # ... or a file (exactly one of the two)
+model = "sonnet"             # optional: passed as --model to the agent
+effort = "medium"             # optional: passed as --effort to the agent
+allowed_tools = [             # optional: passed as --allowed-tools (defaults to Bash(cardthing:*))
+  "Read", "Glob", "Grep", "Edit", "Write",
+  "Bash(cargo:*)", "Bash(cardthing:*)",
+]
+```
+
+**Claiming:** a worker finds the oldest unowned card in `watch` status, then claims it by setting the card's `owner` field to a randomly generated, cute worker name (e.g. `zesty-flamingo-62`) before invoking the agent. The owner field doubles as a lock — it's how workers avoid stepping on each other and how the board shows a card is being actively worked. The owner is **always cleared** once the agent run finishes, whether it succeeded, failed, or needs a human, so the card becomes free again as soon as it's unflagged.
+
+**Watching the run:** while a card is claimed, the web board marks it with a pulsing `agent` badge (from the card's `agent` flag). Every run is logged to `.cards/.logs/<card>-<timestamp>.md` with the agent's full stdout/stderr, so you can review what it did after the fact.
+
+**Clarification round-trip:** if the agent can't complete a card without a human decision, it runs `cardthing edit "<card>" --needs-human`, appends its questions to the card's description, and leaves the card in its current column. Flagged cards show a `🙋` needs-human indicator on the board and are skipped by every worker's polling loop. A human answers the questions directly in the description, then clears the flag — either via the checkbox in the web edit modal or with `cardthing edit "<card>" --clear-needs-human` — which makes the card eligible for pickup again. If an agent run ends without the card being marked done or flagged needs-human, the worker flags it needs-human itself so nothing silently falls through the cracks.
+
 ## Card Data Model
 
 Each card contains:

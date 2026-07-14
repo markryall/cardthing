@@ -221,3 +221,152 @@ fn test_all_status_values() {
         assert!(statuses.contains(&"blocked"));
     });
 }
+
+// ── Worker mode ───────────────────────────────────────────────────────────────
+
+fn setup_worker_project() {
+    std::fs::write(
+        ".cards.toml",
+        r#"
+[[workers]]
+name = "test"
+watch = "todo"
+done = "done"
+prompt = "You are a test agent."
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(".cards").unwrap();
+}
+
+fn write_fake_agent(script_body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = env::current_dir().unwrap().join("fake-agent.sh");
+    std::fs::write(&path, format!("#!/bin/sh\n{}\n", script_body)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+fn run_worker(agent_path: &std::path::Path) {
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_cardthing"))
+        .args([
+            "work",
+            "test",
+            "--max-cards",
+            "1",
+            "--agent-cmd",
+            agent_path.to_str().unwrap(),
+        ])
+        .current_dir(env::current_dir().unwrap())
+        .status()
+        .unwrap();
+    assert!(status.success(), "worker process must exit cleanly");
+}
+
+#[test]
+fn test_worker_processes_card_to_done() {
+    with_temp_cards_dir(|| {
+        setup_worker_project();
+        let card = Card::new("worker card".to_string(), "please do the thing".to_string());
+        storage::save_card(&card).unwrap();
+
+        let agent = write_fake_agent(&format!(
+            "{} edit \"worker card\" --status done\necho \"All done sweetie\"",
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        let card = storage::load_card("worker card").unwrap();
+        assert_eq!(card.status, "done");
+        assert_eq!(card.owner, None, "claim must be released");
+        assert!(card.description.contains("## Agent:"));
+        assert!(card.description.contains("All done sweetie"));
+
+        let logs: Vec<_> = std::fs::read_dir(".cards/.logs").unwrap().collect();
+        assert_eq!(logs.len(), 1, "one agent log file must be written");
+    });
+}
+
+#[test]
+fn test_worker_flags_needs_human_when_agent_does_not_move_card() {
+    with_temp_cards_dir(|| {
+        setup_worker_project();
+        let card = Card::new("stuck card".to_string(), "unclear".to_string());
+        storage::save_card(&card).unwrap();
+
+        let agent = write_fake_agent("echo \"I have questions\"");
+        run_worker(&agent);
+
+        let card = storage::load_card("stuck card").unwrap();
+        assert_eq!(card.status, "todo", "card must stay in its column");
+        assert!(card.needs_human, "card must be flagged for human intervention");
+        assert!(!card.agent, "agent indicator must be cleared");
+        assert_eq!(card.owner, None, "claim must be released");
+        assert!(card.description.contains("I have questions"));
+        assert!(card.description.contains("neither completed the card nor asked for help"));
+    });
+}
+
+#[test]
+fn test_worker_respects_agent_requested_needs_human() {
+    with_temp_cards_dir(|| {
+        setup_worker_project();
+        let card = Card::new("confusing card".to_string(), "which way?".to_string());
+        storage::save_card(&card).unwrap();
+
+        let agent = write_fake_agent(&format!(
+            "{} edit \"confusing card\" --needs-human\necho \"Which way should I go?\"",
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        let card = storage::load_card("confusing card").unwrap();
+        assert_eq!(card.status, "todo", "card must stay in its column");
+        assert!(card.needs_human);
+        assert!(!card.agent);
+        assert_eq!(card.owner, None);
+        assert!(card.description.contains("Which way should I go?"));
+        assert!(
+            !card.description.contains("neither completed"),
+            "no fallback note when the agent asked for help itself"
+        );
+    });
+}
+
+#[test]
+fn test_worker_skips_allocated_and_other_status_cards() {
+    with_temp_cards_dir(|| {
+        setup_worker_project();
+        let mut allocated = Card::new("allocated".to_string(), "taken".to_string());
+        allocated.owner = Some("someone-else-01".to_string());
+        storage::save_card(&allocated).unwrap();
+
+        let mut done = Card::new("finished".to_string(), "done".to_string());
+        done.status = "done".to_string();
+        storage::save_card(&done).unwrap();
+
+        let mut waiting = Card::new("waiting on human".to_string(), "stuck".to_string());
+        waiting.needs_human = true;
+        storage::save_card(&waiting).unwrap();
+
+        let free = Card::new("free card".to_string(), "pick me".to_string());
+        storage::save_card(&free).unwrap();
+
+        let agent = write_fake_agent(&format!(
+            "{} edit \"free card\" --status done\necho ok",
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        assert_eq!(storage::load_card("free card").unwrap().status, "done");
+        assert_eq!(
+            storage::load_card("allocated").unwrap().owner,
+            Some("someone-else-01".to_string()),
+            "allocated card must be untouched"
+        );
+        assert_eq!(storage::load_card("finished").unwrap().status, "done");
+        let waiting = storage::load_card("waiting on human").unwrap();
+        assert_eq!(waiting.status, "todo", "needs_human card must be skipped");
+        assert!(waiting.needs_human);
+    });
+}

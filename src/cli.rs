@@ -77,6 +77,14 @@ pub enum Commands {
         /// Priority (high, medium, low)
         #[arg(long)]
         priority: Option<String>,
+
+        /// Flag the card as requiring human intervention (agents skip it)
+        #[arg(long)]
+        needs_human: bool,
+
+        /// Clear the human-intervention flag
+        #[arg(long)]
+        clear_needs_human: bool,
     },
 
     /// List all cards
@@ -140,6 +148,20 @@ pub enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value = "3000")]
         port: u16,
+    },
+
+    /// Run an agent worker that picks up cards from a column
+    Work {
+        /// Worker profile name from .cards.toml
+        profile: String,
+
+        /// Process at most N cards then exit
+        #[arg(long)]
+        max_cards: Option<u32>,
+
+        /// Override the agent executable (testing)
+        #[arg(long, hide = true)]
+        agent_cmd: Option<String>,
     },
 }
 

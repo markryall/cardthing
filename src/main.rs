@@ -39,6 +39,8 @@ fn main() {
             due,
             clear_due,
             priority,
+            needs_human,
+            clear_needs_human,
         }) => require_init().and_then(|_| {
             commands::edit::execute(
                 name,
@@ -50,6 +52,8 @@ fn main() {
                 due,
                 clear_due,
                 priority,
+                needs_human,
+                clear_needs_human,
             )
         }),
 
@@ -85,6 +89,12 @@ fn main() {
         Some(Commands::Serve { port }) => {
             require_init().and_then(|_| commands::serve::execute(port))
         }
+
+        Some(Commands::Work {
+            profile,
+            max_cards,
+            agent_cmd,
+        }) => require_init().and_then(|_| commands::work::execute(profile, max_cards, agent_cmd)),
     };
 
     if let Err(e) = result {

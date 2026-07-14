@@ -172,6 +172,8 @@ struct CardUpdate {
     checklist: Vec<ChecklistItemInput>,
     due_at: Option<String>,
     priority: Option<String>,
+    #[serde(default)]
+    needs_human: bool,
 }
 
 #[derive(Deserialize)]
@@ -184,6 +186,8 @@ struct NewCardBody {
     checklist: Vec<ChecklistItemInput>,
     due_at: Option<String>,
     priority: Option<String>,
+    #[serde(default)]
+    needs_human: bool,
 }
 
 async fn patch_card_status(
@@ -244,6 +248,7 @@ async fn patch_card(Path(name): Path<String>, Json(body): Json<CardUpdate>) -> J
             .map(parse_due_date)
             .transpose()?;
         card.priority = body.priority.filter(|p| !p.is_empty());
+        card.needs_human = body.needs_human;
         card.updated_at = Utc::now();
         storage::save_card(&card)
     })();
@@ -279,6 +284,7 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
             .map(parse_due_date)
             .transpose()?;
         card.priority = body.priority.filter(|p| !p.is_empty());
+        card.needs_human = body.needs_human;
         card.validate()?;
         storage::save_card(&card)
     })();
@@ -586,6 +592,16 @@ fn render_board(cards: &[Card]) -> String {
   .due-overdue {{ color: #f87171; background: rgba(239,68,68,0.1); }}
   .field input[type=date] {{ width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem; color: #f1f5f9; font-size: 0.875rem; padding: 0.5rem 0.625rem; font-family: inherit; color-scheme: dark; }}
   .field input[type=date]:focus {{ outline: none; border-color: #3b82f6; }}
+  /* Agent worker indicators */
+  .card.agent-working {{ border: 1px dashed #3b82f6; }}
+  .card.needs-human {{ border: 1px solid #f59e0b; }}
+  .agent-badge {{ font-size: 0.7rem; color: #93c5fd; background: rgba(59,130,246,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; display: inline-flex; align-items: center; gap: 0.3rem; }}
+  .agent-dot {{ width: 0.4rem; height: 0.4rem; border-radius: 999px; background: #3b82f6; animation: agent-pulse 1.2s ease-in-out infinite; }}
+  @keyframes agent-pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.25; }} }}
+  .needs-human-badge {{ font-size: 0.7rem; color: #fbbf24; background: rgba(245,158,11,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
+  .field-check {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; }}
+  .field-check input[type=checkbox] {{ cursor: pointer; accent-color: #f59e0b; }}
+  .field-check label {{ font-size: 0.8rem; color: #94a3b8; cursor: pointer; }}
 </style>
 </head>
 <body>
@@ -637,6 +653,10 @@ fn render_board(cards: &[Card]) -> String {
         <option value="medium">Medium</option>
         <option value="low">Low</option>
       </select>
+    </div>
+    <div class="field-check">
+      <input id="f-needs-human" type="checkbox">
+      <label for="f-needs-human">🙋 Needs human intervention (agents will skip this card)</label>
     </div>
     <div class="field">
       <label>Checklist</label>
@@ -901,6 +921,7 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-tags').value = '';
     document.getElementById('f-due').value = '';
     document.getElementById('f-priority').value = '';
+    document.getElementById('f-needs-human').checked = false;
     document.getElementById('cl-items').innerHTML = '';
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
@@ -920,6 +941,7 @@ fn render_board(cards: &[Card]) -> String {
     document.getElementById('f-tags').value = el.dataset.tags || '';
     document.getElementById('f-due').value = el.dataset.due || '';
     document.getElementById('f-priority').value = el.dataset.priority || '';
+    document.getElementById('f-needs-human').checked = el.dataset.needsHuman === 'true';
     document.getElementById('cl-items').innerHTML = '';
     const checklist = JSON.parse(el.dataset.checklist || '[]');
     checklist.forEach(item => addChecklistRow(item.text, item.checked));
@@ -948,6 +970,7 @@ fn render_board(cards: &[Card]) -> String {
       .split(',').map(t => t.trim()).filter(Boolean);
     const due_at = document.getElementById('f-due').value || null;
     const priority = document.getElementById('f-priority').value || null;
+    const needs_human = document.getElementById('f-needs-human').checked;
     const checklist = getChecklistFromModal();
 
     let url, method, body;
@@ -956,11 +979,11 @@ fn render_board(cards: &[Card]) -> String {
       if (!name) {{ errorEl.textContent = 'Name is required'; return; }}
       url = '/cards';
       method = 'POST';
-      body = {{ name, description, status, owner, tags, checklist, due_at, priority }};
+      body = {{ name, description, status, owner, tags, checklist, due_at, priority, needs_human }};
     }} else {{
       url = `/cards/${{encodeURIComponent(editCardName)}}`;
       method = 'PATCH';
-      body = {{ description, status, owner, tags, checklist, due_at, priority }};
+      body = {{ description, status, owner, tags, checklist, due_at, priority, needs_human }};
     }}
 
     const btn = document.getElementById('modal-submit');
@@ -1183,6 +1206,15 @@ fn render_card(card: &Card) -> String {
 
     let meta_html: String = {
         let mut parts = Vec::new();
+        if card.agent {
+            parts.push(
+                r#"<span class="agent-badge"><span class="agent-dot"></span>agent</span>"#
+                    .to_string(),
+            );
+        }
+        if card.needs_human {
+            parts.push(r#"<span class="needs-human-badge">🙋 needs human</span>"#.to_string());
+        }
         if let Some(ref p) = card.priority {
             let cls = match p.as_str() {
                 "high" => "priority-badge priority-high",
@@ -1234,8 +1266,14 @@ fn render_card(card: &Card) -> String {
         .collect::<Vec<_>>()
         .join(",");
 
+    let extra_classes = format!(
+        "{}{}",
+        if card.agent { " agent-working" } else { "" },
+        if card.needs_human { " needs-human" } else { "" }
+    );
+
     format!(
-        r#"<div class="card"
+        r#"<div class="card{extra_classes}"
   data-name="{name}"
   data-description="{desc}"
   data-status="{status}"
@@ -1243,11 +1281,14 @@ fn render_card(card: &Card) -> String {
   data-tags="{tags}"
   data-due="{due}"
   data-priority="{priority}"
+  data-needs-human="{needs_human}"
   data-checklist="[{checklist_json}]"
   onclick="openEdit(this)">
   <div class="card-name">{name_display}</div>
   {desc_display}{meta_div}{checklist_html}
 </div>"#,
+        extra_classes = extra_classes,
+        needs_human = card.needs_human,
         name = escape_html(&card.name),
         desc = escape_html(&card.description),
         status = escape_html(&card.status),

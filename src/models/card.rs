@@ -27,6 +27,16 @@ pub struct Card {
     pub due_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    /// An agent worker currently holds this card (owner is the worker's name)
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub agent: bool,
+    /// Human intervention required; agent workers will not pick this card up
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub needs_human: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl Card {
@@ -44,6 +54,8 @@ impl Card {
             order: None,
             due_at: None,
             priority: None,
+            agent: false,
+            needs_human: false,
         }
     }
 

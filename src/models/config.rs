@@ -16,11 +16,32 @@ impl StatusDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerProfile {
+    pub name: String,
+    pub watch: String,
+    pub done: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// Tools the agent may use without prompting (claude --allowed-tools).
+    /// Defaults to just enough to move the card: Bash(cardthing:*)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_title")]
     pub title: String,
     #[serde(default = "default_statuses")]
     pub statuses: Vec<StatusDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workers: Vec<WorkerProfile>,
 }
 
 impl Default for Config {
@@ -28,6 +49,7 @@ impl Default for Config {
         Config {
             title: default_title(),
             statuses: default_statuses(),
+            workers: Vec::new(),
         }
     }
 }
@@ -53,6 +75,12 @@ impl Config {
 
     pub fn find_status(&self, id: &str) -> Option<&StatusDef> {
         self.statuses.iter().find(|s| s.id.eq_ignore_ascii_case(id))
+    }
+
+    pub fn find_worker(&self, name: &str) -> Option<&WorkerProfile> {
+        self.workers
+            .iter()
+            .find(|w| w.name.eq_ignore_ascii_case(name))
     }
 
     pub fn validate_status(&self, id: &str) -> anyhow::Result<String> {

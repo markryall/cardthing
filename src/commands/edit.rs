@@ -15,6 +15,8 @@ pub fn execute(
     due: Option<String>,
     clear_due: bool,
     priority: Option<String>,
+    needs_human: bool,
+    clear_needs_human: bool,
 ) -> Result<()> {
     let mut card = storage::load_card(&name)?;
     let mut changes = Vec::new();
@@ -67,6 +69,17 @@ pub fn execute(
         let validated = validate_priority(&p)?;
         changes.push(format!("priority to '{}'", validated));
         card.priority = Some(validated);
+    }
+
+    if needs_human && clear_needs_human {
+        bail!("--needs-human and --clear-needs-human are mutually exclusive");
+    }
+    if needs_human {
+        card.needs_human = true;
+        changes.push("flagged as needing human intervention".to_string());
+    } else if clear_needs_human {
+        card.needs_human = false;
+        changes.push("cleared human-intervention flag".to_string());
     }
 
     if changes.is_empty() {

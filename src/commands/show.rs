@@ -34,6 +34,14 @@ pub fn execute(name: String) -> Result<()> {
         println!("  Due:     {}", due.format("%Y-%m-%d"));
     }
 
+    if card.agent {
+        println!("  Agent:   {}", "working on this card".blue());
+    }
+
+    if card.needs_human {
+        println!("  Human:   {}", "intervention required".yellow().bold());
+    }
+
     if !card.tags.is_empty() {
         println!("  Tags:    {}", card.tags.join(", "));
     }
