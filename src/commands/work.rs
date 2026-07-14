@@ -196,8 +196,19 @@ fn next_unallocated(watch: &str) -> Result<Option<Card>> {
         .into_iter()
         .filter(|c| c.status == watch && c.owner.is_none() && !c.needs_human)
         .collect();
-    cards.sort_by_key(|c| c.updated_at);
+    sort_by_board_order(&mut cards);
     Ok(cards.into_iter().next())
+}
+
+/// Sort cards the same way the web board displays a column (order field
+/// ascending, unordered cards last, created_at as tiebreaker) so the top
+/// card on the board is the next one picked up.
+fn sort_by_board_order(cards: &mut [Card]) {
+    cards.sort_by(|a, b| {
+        let ao = a.order.unwrap_or(u32::MAX);
+        let bo = b.order.unwrap_or(u32::MAX);
+        ao.cmp(&bo).then_with(|| a.created_at.cmp(&b.created_at))
+    });
 }
 
 fn claims_dir() -> PathBuf {
@@ -495,6 +506,36 @@ mod tests {
             winners.iter().filter(|&&w| w).count(),
             1,
             "exactly one thread must win the claim lock"
+        );
+    }
+
+    #[test]
+    fn test_sort_by_board_order_matches_column_display() {
+        let mut top = Card::new("dragged to top".into(), "".into());
+        top.order = Some(0);
+        let mut second = Card::new("second".into(), "".into());
+        second.order = Some(1);
+        let unordered_old = Card::new("never dragged, oldest".into(), "".into());
+        let mut unordered_new = Card::new("never dragged, newest".into(), "".into());
+        unordered_new.created_at = unordered_old.created_at + chrono::Duration::seconds(10);
+
+        let mut cards = vec![
+            unordered_new.clone(),
+            second.clone(),
+            unordered_old.clone(),
+            top.clone(),
+        ];
+        sort_by_board_order(&mut cards);
+
+        let names: Vec<&str> = cards.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "dragged to top",
+                "second",
+                "never dragged, oldest",
+                "never dragged, newest"
+            ]
         );
     }
 

@@ -2,5 +2,6 @@ name = "per-worker jj workspaces"
 status = "todo"
 description = "When multiple workers run concurrently they all edit the same jj working-copy commit, so their changes get squashed together and cannot be reviewed or committed independently. Add opt-in isolation: a 'workspace = true' field on the [[workers]] profile. When set, 'cardthing work' creates a jj workspace before spawning the agent (jj workspace add --name <worker-name> <sibling-path>, e.g. ../<repo>-ws-<worker-name>), runs the agent with that workspace as its cwd, and includes in the task prompt that all cardthing card commands must be run from the main repo directory (absolute path provided) so the live board is updated, while code changes happen in the workspace. After the run, append the workspace path to the card so a human can review, merge/squash, and 'jj workspace forget' it; if the workspace has no changes, forget and remove it automatically. Only activate when a .jj directory exists; otherwise behave as today. Include tests where feasible (workspace creation can be tested against a scratch jj repo)."
 created_at = "2026-07-14T03:03:54.571021Z"
-updated_at = "2026-07-14T03:03:54.571021Z"
+updated_at = "2026-07-14T03:06:55.447694Z"
 tags = ["dogfood"]
+order = 0

@@ -2,5 +2,6 @@ name = "init template for workers"
 status = "todo"
 description = "Make 'cardthing init' (src/commands/init.rs) include a commented-out example [[workers]] block in the generated .cards.toml. Also ensure .cards/.logs/ and .cards/.claims/ are ignored: add them to this repo's .gitignore and have init create or extend a .gitignore with those entries."
 created_at = "2026-07-13T23:23:11.686415Z"
-updated_at = "2026-07-13T23:56:05.808899Z"
+updated_at = "2026-07-14T03:06:55.450663Z"
 tags = ["dogfood"]
+order = 3
