@@ -557,3 +557,63 @@ fn test_worker_auto_forgets_empty_workspace() {
         );
     });
 }
+
+#[test]
+fn test_init_creates_config_with_commented_workers_example() {
+    with_temp_cards_dir(|| {
+        commands::init::execute().unwrap();
+
+        let config = std::fs::read_to_string(".cards.toml").unwrap();
+        assert!(
+            config.contains("# [[workers]]"),
+            "expected a commented-out [[workers]] example, got:\n{}",
+            config
+        );
+
+        // Must not be picked up as a real, active worker profile.
+        let loaded = cardthing::models::Config::load();
+        assert!(loaded.workers.is_empty());
+    });
+}
+
+#[test]
+fn test_init_creates_gitignore_when_missing() {
+    with_temp_cards_dir(|| {
+        commands::init::execute().unwrap();
+
+        let gitignore = std::fs::read_to_string(".gitignore").unwrap();
+        assert!(gitignore.contains(".cards/.logs/"));
+        assert!(gitignore.contains(".cards/.claims/"));
+    });
+}
+
+#[test]
+fn test_init_extends_existing_gitignore() {
+    with_temp_cards_dir(|| {
+        std::fs::write(".gitignore", "/target\n").unwrap();
+
+        commands::init::execute().unwrap();
+
+        let gitignore = std::fs::read_to_string(".gitignore").unwrap();
+        assert!(gitignore.contains("/target"));
+        assert!(gitignore.contains(".cards/.logs/"));
+        assert!(gitignore.contains(".cards/.claims/"));
+    });
+}
+
+#[test]
+fn test_init_does_not_duplicate_existing_gitignore_entries() {
+    with_temp_cards_dir(|| {
+        std::fs::write(".gitignore", "/target\n.cards/.logs/\n").unwrap();
+
+        commands::init::execute().unwrap();
+
+        let gitignore = std::fs::read_to_string(".gitignore").unwrap();
+        assert_eq!(
+            gitignore.matches(".cards/.logs/").count(),
+            1,
+            "should not duplicate an entry that was already present"
+        );
+        assert!(gitignore.contains(".cards/.claims/"));
+    });
+}
