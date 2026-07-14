@@ -675,6 +675,24 @@ fn process_card(
     Ok(())
 }
 
+/// Maximum length (in characters) of agent output appended to a card's
+/// description before it gets truncated in favour of a pointer to the full
+/// log file under `.cards/.logs/`.
+const MAX_AGENT_TEXT_CHARS: usize = 4000;
+
+/// Truncate `agent_text` to roughly `MAX_AGENT_TEXT_CHARS` characters, noting
+/// that the full output is available in the `.cards/.logs/` directory.
+fn truncate_agent_text(agent_text: &str) -> String {
+    if agent_text.chars().count() <= MAX_AGENT_TEXT_CHARS {
+        return agent_text.to_string();
+    }
+    let truncated: String = agent_text.chars().take(MAX_AGENT_TEXT_CHARS).collect();
+    format!(
+        "{}\n\n[worker note: output truncated; full output saved in .cards/.logs/]",
+        truncated
+    )
+}
+
 /// Post-process a card after the agent run: append the agent's output to the
 /// description, flag it for human intervention if the agent neither finished
 /// nor asked for help, and release the claim.
@@ -697,7 +715,7 @@ pub fn finish_card(
         "\n\n## Agent: {} ({})\n\n{}",
         worker_name,
         Utc::now().format("%Y-%m-%d %H:%M UTC"),
-        agent_text
+        truncate_agent_text(agent_text)
     );
     if let Some(reason) = failure {
         section.push_str(&format!("\n\n[worker note: {}]", reason));
@@ -938,6 +956,24 @@ mod tests {
         assert!(rendered.contains("Priority: high"));
         assert!(rendered.contains("Tags: a, b"));
         assert!(rendered.contains("- [x] step one"));
+    }
+
+    #[test]
+    fn test_truncate_agent_text_leaves_short_output_untouched() {
+        let text = "short agent output";
+        assert_eq!(truncate_agent_text(text), text);
+    }
+
+    #[test]
+    fn test_truncate_agent_text_caps_long_output_with_note() {
+        let text = "a".repeat(MAX_AGENT_TEXT_CHARS + 500);
+        let truncated = truncate_agent_text(&text);
+        assert!(
+            truncated.len() < text.len(),
+            "truncated output should be shorter than the original"
+        );
+        assert!(truncated.starts_with(&"a".repeat(MAX_AGENT_TEXT_CHARS)));
+        assert!(truncated.contains(".cards/.logs/"));
     }
 
     #[test]
