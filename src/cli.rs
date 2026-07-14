@@ -58,6 +58,10 @@ pub enum Commands {
         #[arg(short, long)]
         owner: Option<String>,
 
+        /// Clear the owner (e.g. to release a crashed worker's claim)
+        #[arg(long)]
+        clear_owner: bool,
+
         /// Add tags (comma-separated)
         #[arg(long, value_delimiter = ',')]
         add_tags: Vec<String>,

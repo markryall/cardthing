@@ -1,6 +1,20 @@
 name = "add edit --clear-owner flag"
-status = "todo"
-description = "Add a --clear-owner flag to 'cardthing edit', mirroring the existing --clear-due flag (src/cli.rs, src/commands/edit.rs), so a crashed worker's claim on a card can be released from the CLI. Include tests."
+status = "done"
+description = """
+Add a --clear-owner flag to 'cardthing edit', mirroring the existing --clear-due flag (src/cli.rs, src/commands/edit.rs), so a crashed worker's claim on a card can be released from the CLI. Include tests.
+
+## Agent: zesty-ocelot-59 (2026-07-14 02:55 UTC)
+
+Okay girl, done and dusted! 💅✨
+
+**What I did:**
+- Added `--clear-owner` flag to `cardthing edit` in `src/cli.rs`, mirroring `--clear-due`.
+- Wired it through `src/commands/edit.rs::execute` — `clear_owner` takes precedence over `--owner` if both are somehow passed (same pattern as `clear_due`/`due`).
+- Updated all callers of `commands::edit::execute` (`src/main.rs`, `src/shell.rs` × 6 call sites) to pass the new param.
+- Added two integration tests in `tests/integration_tests.rs`: one confirming `--clear-owner` releases a claim, one confirming it wins over a simultaneous `--owner` value.
+- `cargo build` and `cargo test` are both green (19 integration tests + 11 unit tests, all passing), and I manually checked `cardthing edit --help` shows the new flag correctly.
+
+Card `add edit --clear-owner flag` is now marked `done`. 🎉"""
 created_at = "2026-07-13T23:23:11.657019Z"
-updated_at = "2026-07-13T23:56:05.790546Z"
+updated_at = "2026-07-14T02:55:04.255958Z"
 tags = ["dogfood"]

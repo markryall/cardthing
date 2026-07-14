@@ -1,3 +1,4 @@
+use cardthing::commands;
 use cardthing::models::Card;
 use cardthing::storage;
 use std::env;
@@ -219,6 +220,64 @@ fn test_all_status_values() {
         assert!(statuses.contains(&"inprogress"));
         assert!(statuses.contains(&"done"));
         assert!(statuses.contains(&"blocked"));
+    });
+}
+
+// ── Edit command ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_edit_clear_owner() {
+    with_temp_cards_dir(|| {
+        let mut card = Card::new("Owned Card".to_string(), "Has an owner".to_string());
+        card.owner = Some("zesty-ocelot-59".to_string());
+        storage::save_card(&card).unwrap();
+
+        commands::edit::execute(
+            "Owned Card".to_string(),
+            None,
+            None,
+            None,
+            true,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let loaded = storage::load_card("Owned Card").unwrap();
+        assert_eq!(loaded.owner, None, "claim must be released");
+    });
+}
+
+#[test]
+fn test_edit_clear_owner_takes_precedence_over_owner() {
+    with_temp_cards_dir(|| {
+        let mut card = Card::new("Contested Card".to_string(), "Has an owner".to_string());
+        card.owner = Some("someone".to_string());
+        storage::save_card(&card).unwrap();
+
+        commands::edit::execute(
+            "Contested Card".to_string(),
+            None,
+            None,
+            Some("someone-else".to_string()),
+            true,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let loaded = storage::load_card("Contested Card").unwrap();
+        assert_eq!(loaded.owner, None, "clear-owner wins over owner");
     });
 }
 

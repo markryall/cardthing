@@ -10,6 +10,7 @@ pub fn execute(
     description: Option<String>,
     status: Option<String>,
     owner: Option<String>,
+    clear_owner: bool,
     add_tags: Vec<String>,
     remove_tags: Vec<String>,
     due: Option<String>,
@@ -33,7 +34,10 @@ pub fn execute(
         changes.push(format!("status to '{}'", new_status));
     }
 
-    if let Some(owner_value) = owner {
+    if clear_owner {
+        card.owner = None;
+        changes.push("cleared owner".to_string());
+    } else if let Some(owner_value) = owner {
         if owner_value.is_empty() || owner_value == "-" {
             card.owner = None;
             changes.push("removed owner".to_string());
