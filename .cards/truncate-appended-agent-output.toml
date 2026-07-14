@@ -1,0 +1,6 @@
+name = "truncate appended agent output"
+status = "todo"
+description = "In finish_card in src/commands/work.rs, cap the agent section appended to the card description at roughly 4000 characters, adding a note that the full output is in the .cards/.logs/ file. Include a test."
+created_at = "2026-07-13T23:23:11.695236Z"
+updated_at = "2026-07-13T23:56:05.812177Z"
+tags = ["dogfood"]

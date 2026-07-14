@@ -1,0 +1,43 @@
+title = "My Board"
+
+[[statuses]]
+id = "todo"
+label = "Todo"
+color = "#f59e0b"
+
+[[statuses]]
+id = "foo"
+label = "foo"
+color = "#a855f7"
+
+[[statuses]]
+id = "inprogress"
+label = "In Progress"
+color = "#3b82f6"
+
+[[statuses]]
+id = "done"
+label = "Done"
+color = "#10b981"
+
+[[statuses]]
+id = "blocked"
+label = "Blocked"
+color = "#ef4444"
+
+[[workers]]
+name = "implement"
+watch = "todo"
+done = "done"
+prompt_file = ".cards/prompts/implement.md"
+model = "sonnet"
+effort = "medium"
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Edit",
+  "Write",
+  "Bash(cargo:*)",
+  "Bash(cardthing:*)",
+]

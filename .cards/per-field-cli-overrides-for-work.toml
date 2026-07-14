@@ -1,0 +1,6 @@
+name = "per-field CLI overrides for work"
+status = "todo"
+description = "Add optional --watch, --done, --prompt-file, --model and --effort flags to 'cardthing work' (src/cli.rs, src/commands/work.rs) that override the corresponding fields of the selected profile."
+created_at = "2026-07-13T23:23:11.676158Z"
+updated_at = "2026-07-13T23:56:05.802141Z"
+tags = ["dogfood"]

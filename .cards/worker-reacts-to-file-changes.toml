@@ -1,0 +1,6 @@
+name = "worker reacts to file changes"
+status = "todo"
+description = "Use the notify crate (see the watcher pattern in src/commands/serve.rs around line 83) so 'cardthing work' wakes up when .cards/ changes instead of only polling every 15 seconds. Keep the poll as a fallback and make the interval configurable via an optional poll_seconds field on the worker profile (src/models/config.rs)."
+created_at = "2026-07-13T23:23:11.670103Z"
+updated_at = "2026-07-13T23:56:05.798697Z"
+tags = ["dogfood"]

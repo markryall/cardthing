@@ -1,0 +1,6 @@
+name = "add edit --clear-owner flag"
+status = "todo"
+description = "Add a --clear-owner flag to 'cardthing edit', mirroring the existing --clear-due flag (src/cli.rs, src/commands/edit.rs), so a crashed worker's claim on a card can be released from the CLI. Include tests."
+created_at = "2026-07-13T23:23:11.657019Z"
+updated_at = "2026-07-13T23:56:05.790546Z"
+tags = ["dogfood"]

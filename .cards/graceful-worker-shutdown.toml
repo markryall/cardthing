@@ -1,0 +1,6 @@
+name = "graceful worker shutdown"
+status = "todo"
+description = "In 'cardthing work' (src/commands/work.rs): the first Ctrl-C finishes the current card then exits; a second Ctrl-C kills the agent child process, clears the in-flight card's owner (releasing the claim), and exits. When idle, exit immediately on the first Ctrl-C."
+created_at = "2026-07-13T23:23:11.664812Z"
+updated_at = "2026-07-13T23:56:05.794695Z"
+tags = ["dogfood"]

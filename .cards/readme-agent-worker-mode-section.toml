@@ -1,0 +1,19 @@
+name = "README agent worker mode section"
+status = "done"
+description = """
+Document worker mode in README.md: the [[workers]] profile format (name, watch, done, prompt/prompt_file, model, effort, allowed_tools), launching with 'cardthing work <profile>', the owner-field-as-claim convention and cute worker names, the agent/needs_human card indicators on the web board, log files in .cards/.logs/, and the clarification round-trip: the agent flags a card with 'cardthing edit <card> --needs-human' and leaves it in its column with its questions appended to the description; a human answers inside the description and clears the flag (web modal checkbox or 'cardthing edit <card> --clear-needs-human'); workers skip flagged cards, and the owner is always cleared after a run so the card becomes eligible again once unflagged.
+
+## Agent: zesty-flamingo-62 (2026-07-13 23:55 UTC)
+
+Done, girl! 💅 I added a whole new **Worker Mode (Agent Automation)** section to README.md, tucked right after Web Board Mode where it belongs. It covers:
+
+- Launching with `cardthing work <profile>` and `--max-cards`
+- The full `[[workers]]` TOML shape (name, watch, done, prompt/prompt_file, model, effort, allowed_tools)
+- The owner-field-as-claim convention with cute generated names like `zesty-flamingo-62` 💁‍♀️
+- The `agent` badge on the web board + `.cards/.logs/` transcripts
+- The needs-human clarification round-trip end to end: agent flags → questions appended to description → card stays put and gets skipped → human answers + clears the flag (web checkbox or `--clear-needs-human`) → owner always cleared so it's fair game again
+
+Ran `cargo test` — all 17 pass, nothing broke, card's now sitting pretty in **done**. No notes, no drama, no needs-human flag needed this time. 💋"""
+created_at = "2026-07-13T23:23:11.691171Z"
+updated_at = "2026-07-13T23:55:21.535949Z"
+tags = ["dogfood"]
