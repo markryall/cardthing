@@ -5,13 +5,13 @@ use chrono::Utc;
 use colored::Colorize;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const POLL_SECONDS: u64 = 15;
 
@@ -260,6 +260,56 @@ fn logs_dir() -> PathBuf {
     storage::get_cards_path().join(".logs")
 }
 
+/// A lock file untouched for this long is assumed to be left over from a
+/// worker that crashed mid-claim rather than one still legitimately held.
+const STALE_LOCK_SECS: u64 = 60;
+
+/// Try to exclusively create `lock_path`, stamping it with the current unix
+/// time so staleness can later be judged from its contents. Returns whether
+/// the lock was acquired.
+fn acquire_lock(lock_path: &Path) -> bool {
+    // O_EXCL: creation fails if another worker holds the lock
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock_path)
+    {
+        Ok(mut f) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let _ = f.write_all(now.to_string().as_bytes());
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// If `lock_path` holds a timestamp older than [`STALE_LOCK_SECS`], treat it
+/// as left over from a crashed worker and delete it. Returns true when the
+/// caller should retry acquiring the lock (either it was stolen, or it had
+/// already vanished on its own).
+fn steal_stale_lock(lock_path: &Path) -> bool {
+    let contents = match fs::read_to_string(lock_path) {
+        Ok(c) => c,
+        Err(_) => return true, // vanished already; a retry will just recreate it
+    };
+    let created: u64 = match contents.trim().parse() {
+        Ok(v) => v,
+        Err(_) => return false, // unreadable timestamp; leave a lock we don't understand alone
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now.saturating_sub(created) >= STALE_LOCK_SECS {
+        fs::remove_file(lock_path).is_ok()
+    } else {
+        false
+    }
+}
+
 /// Attempt to claim a card by setting its owner, guarded by an exclusive lock
 /// file so sibling workers cannot claim the same card. Returns the claimed
 /// card, or None if someone else got there first.
@@ -267,14 +317,12 @@ fn claim(card_name: &str, watch: &str, worker_name: &str) -> Result<Option<Card>
     fs::create_dir_all(claims_dir())?;
     let lock_path = claims_dir().join(format!("{}.lock", storage::sanitize_filename(card_name)));
 
-    // O_EXCL: creation fails if another worker holds the lock
-    if fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-        .is_err()
-    {
-        return Ok(None);
+    if !acquire_lock(&lock_path) {
+        // Someone else holds the lock. If it's stale -- left over from a
+        // crashed worker -- steal it and retry once.
+        if !steal_stale_lock(&lock_path) || !acquire_lock(&lock_path) {
+            return Ok(None);
+        }
     }
 
     let result = (|| -> Result<Option<Card>> {
@@ -776,6 +824,73 @@ mod tests {
             1,
             "exactly one thread must win the claim lock"
         );
+    }
+
+    #[test]
+    fn test_steal_stale_lock_removes_old_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("card.lock");
+        let created = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(STALE_LOCK_SECS + 1);
+        fs::write(&lock_path, created.to_string()).unwrap();
+
+        assert!(
+            steal_stale_lock(&lock_path),
+            "a lock older than the stale threshold should be stolen"
+        );
+        assert!(
+            !lock_path.exists(),
+            "stealing a stale lock should remove it"
+        );
+    }
+
+    #[test]
+    fn test_steal_stale_lock_leaves_fresh_lock_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("card.lock");
+        let created = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        fs::write(&lock_path, created.to_string()).unwrap();
+
+        assert!(
+            !steal_stale_lock(&lock_path),
+            "a fresh lock must not be stolen"
+        );
+        assert!(lock_path.exists());
+    }
+
+    #[test]
+    fn test_claim_recovers_from_crashed_worker_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let card = Card::new("Stale Lock Card".into(), "".into());
+        storage::save_card(&card).unwrap();
+
+        fs::create_dir_all(claims_dir()).unwrap();
+        let lock_path =
+            claims_dir().join(format!("{}.lock", storage::sanitize_filename(&card.name)));
+        let created = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(STALE_LOCK_SECS + 1);
+        fs::write(&lock_path, created.to_string()).unwrap();
+
+        let result = claim(&card.name, "todo", "new-worker");
+
+        std::env::set_current_dir(original).unwrap();
+
+        let claimed = result
+            .unwrap()
+            .expect("a stale lock should be stolen and the card claimed");
+        assert_eq!(claimed.owner, Some("new-worker".to_string()));
     }
 
     #[test]
