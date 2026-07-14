@@ -429,3 +429,131 @@ fn test_worker_skips_allocated_and_other_status_cards() {
         assert!(waiting.needs_human);
     });
 }
+
+// ── Per-worker jj workspaces ────────────────────────────────────────────────
+
+/// True if `jj` is on PATH; workspace tests skip quietly otherwise.
+fn jj_available() -> bool {
+    std::process::Command::new("jj")
+        .arg("--version")
+        .output()
+        .is_ok()
+}
+
+fn init_jj_repo() {
+    let status = std::process::Command::new("jj")
+        .args(["git", "init", "."])
+        .status()
+        .unwrap();
+    assert!(status.success(), "jj git init must succeed");
+}
+
+/// Pull the generated worker instance name (e.g. "sparkly-otter-42") back out
+/// of the "## Agent: <name> (...)" section the worker appends to a card.
+fn worker_name_from_description(desc: &str) -> String {
+    let after = desc.split("## Agent: ").nth(1).expect("agent section present");
+    after.split(" (").next().unwrap().trim().to_string()
+}
+
+fn setup_workspace_worker_project() {
+    std::fs::write(
+        ".cards.toml",
+        r#"
+[[workers]]
+name = "test"
+watch = "todo"
+done = "done"
+prompt = "You are a test agent."
+workspace = true
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(".cards").unwrap();
+}
+
+#[test]
+fn test_worker_leaves_workspace_for_review_when_it_has_changes() {
+    if !jj_available() {
+        eprintln!("skipping: jj not found on PATH");
+        return;
+    }
+    with_temp_cards_dir(|| {
+        init_jj_repo();
+        setup_workspace_worker_project();
+        let card = Card::new("workspace card".to_string(), "please do the thing".to_string());
+        storage::save_card(&card).unwrap();
+
+        let repo_root = env::current_dir().unwrap();
+        // Agent writes a file in its (isolated) cwd, then hops back to the
+        // main repo dir to update the card, per the task prompt's rules.
+        let agent = write_fake_agent(&format!(
+            "echo hello > new-file-from-agent.txt\ncd \"{}\"\n{} edit \"workspace card\" --status done\necho \"All done sweetie\"",
+            repo_root.display(),
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        let card = storage::load_card("workspace card").unwrap();
+        assert_eq!(card.status, "done");
+        assert!(
+            card.description.contains("jj workspace"),
+            "card should note the workspace for human review: {}",
+            card.description
+        );
+
+        let repo_name = repo_root.file_name().unwrap().to_str().unwrap();
+        let worker_name = worker_name_from_description(&card.description);
+        let ws_dir = repo_root
+            .parent()
+            .unwrap()
+            .join(format!("{}-ws-{}", repo_name, worker_name));
+        assert!(
+            ws_dir.join("new-file-from-agent.txt").exists(),
+            "workspace with changes must be left in place at {}",
+            ws_dir.display()
+        );
+        std::fs::remove_dir_all(&ws_dir).ok();
+    });
+}
+
+#[test]
+fn test_worker_auto_forgets_empty_workspace() {
+    if !jj_available() {
+        eprintln!("skipping: jj not found on PATH");
+        return;
+    }
+    with_temp_cards_dir(|| {
+        init_jj_repo();
+        setup_workspace_worker_project();
+        let card = Card::new("empty workspace card".to_string(), "please do the thing".to_string());
+        storage::save_card(&card).unwrap();
+
+        let repo_root = env::current_dir().unwrap();
+        // Agent makes no code changes at all, just updates the card.
+        let agent = write_fake_agent(&format!(
+            "cd \"{}\"\n{} edit \"empty workspace card\" --status done\necho \"Nothing to change\"",
+            repo_root.display(),
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        let card = storage::load_card("empty workspace card").unwrap();
+        assert_eq!(card.status, "done");
+        assert!(
+            !card.description.contains("jj workspace"),
+            "an unchanged workspace should be forgotten, not left for review: {}",
+            card.description
+        );
+
+        let repo_name = repo_root.file_name().unwrap().to_str().unwrap();
+        let worker_name = worker_name_from_description(&card.description);
+        let ws_dir = repo_root
+            .parent()
+            .unwrap()
+            .join(format!("{}-ws-{}", repo_name, worker_name));
+        assert!(
+            !ws_dir.exists(),
+            "empty workspace must be forgotten and removed"
+        );
+    });
+}

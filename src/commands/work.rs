@@ -277,20 +277,171 @@ pub fn render_card(card: &Card) -> String {
     out
 }
 
-fn task_prompt(card: &Card, worker: &WorkerProfile, worker_name: &str) -> String {
-    format!(
+fn task_prompt(
+    card: &Card,
+    worker: &WorkerProfile,
+    worker_name: &str,
+    workspace: Option<&Path>,
+    repo_root: &Path,
+) -> String {
+    let mut prompt = format!(
         "You are worker '{worker_name}'. Perform the work described by the card below, \
          in the current directory.\n\n\
          When the work is complete, run: cardthing edit \"{name}\" --status {done}\n\
          If you cannot proceed without a human decision, state your questions clearly in \
          your final response and run: cardthing edit \"{name}\" --needs-human\n\
-         Do not change the card's owner or status in any other way.\n\n\
-         {card}",
+         Do not change the card's owner or status in any other way.\n\n",
         worker_name = worker_name,
         name = card.name,
         done = worker.done,
-        card = render_card(card)
-    )
+    );
+    if let Some(ws) = workspace {
+        prompt.push_str(&format!(
+            "Your working copy is the isolated jj workspace at {ws}. Make all code changes \
+             there. However, all `cardthing` card commands (edit/show/etc., including the \
+             ones above) must be run from the main repository directory at {repo_root} \
+             instead, so the live board is updated rather than a stale copy in the \
+             workspace.\n\n",
+            ws = ws.display(),
+            repo_root = repo_root.display(),
+        ));
+    }
+    prompt.push_str(&render_card(card));
+    prompt
+}
+
+/// True if the current directory is (or is inside) a jj repository.
+fn jj_repo_present() -> bool {
+    Path::new(".jj").is_dir()
+}
+
+/// Sibling path a worker's isolated jj workspace is created at, e.g.
+/// ../cardthing-ws-sparkly-otter-42 next to the main repo checkout.
+fn workspace_sibling_path(repo_root: &Path, worker_name: &str) -> PathBuf {
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo");
+    let dir_name = format!("{}-ws-{}", repo_name, worker_name);
+    match repo_root.parent() {
+        Some(parent) => parent.join(dir_name),
+        None => PathBuf::from(format!("../{}", dir_name)),
+    }
+}
+
+/// Create a jj workspace for a worker, returning its path. The workspace is
+/// created as a sibling directory of the main repo checkout.
+fn create_workspace(repo_root: &Path, worker_name: &str) -> Result<PathBuf> {
+    let path = workspace_sibling_path(repo_root, worker_name);
+    let status = Command::new("jj")
+        .arg("workspace")
+        .arg("add")
+        .arg("--name")
+        .arg(worker_name)
+        .arg(&path)
+        .current_dir(repo_root)
+        .status()
+        .context("failed to run 'jj workspace add'")?;
+    if !status.success() {
+        anyhow::bail!("'jj workspace add' failed for worker '{}'", worker_name);
+    }
+    Ok(path)
+}
+
+/// True if the workspace's working-copy commit has any changes relative to
+/// its parent (i.e. the agent actually did something in it).
+fn workspace_has_changes(workspace_path: &Path) -> Result<bool> {
+    let output = Command::new("jj")
+        .arg("log")
+        .arg("--no-graph")
+        .arg("-r")
+        .arg("@")
+        .arg("-T")
+        .arg(r#"if(empty, "empty", "changed")"#)
+        .current_dir(workspace_path)
+        .output()
+        .context("failed to run 'jj log'")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "'jj log' failed to check for changes in workspace {}",
+            workspace_path.display()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim() != "empty")
+}
+
+/// Forget (and remove) a worker's jj workspace, e.g. because it ended up
+/// with no changes.
+fn forget_workspace(repo_root: &Path, worker_name: &str, workspace_path: &Path) -> Result<()> {
+    let status = Command::new("jj")
+        .arg("workspace")
+        .arg("forget")
+        .arg(worker_name)
+        .current_dir(repo_root)
+        .status()
+        .context("failed to run 'jj workspace forget'")?;
+    if !status.success() {
+        anyhow::bail!("'jj workspace forget' failed for worker '{}'", worker_name);
+    }
+    let _ = fs::remove_dir_all(workspace_path);
+    Ok(())
+}
+
+/// After an agent run in an isolated workspace: if it made no changes, clean
+/// it up automatically; otherwise leave it in place and note its path on the
+/// card so a human can review, merge/squash, and forget it.
+fn reconcile_workspace(
+    repo_root: &Path,
+    card_name: &str,
+    worker_name: &str,
+    workspace_path: &Path,
+) {
+    let has_changes = match workspace_has_changes(workspace_path) {
+        Ok(v) => v,
+        Err(e) => {
+            log(
+                worker_name,
+                &format!(
+                    "could not check workspace '{}' for changes ({}), leaving it for review",
+                    worker_name, e
+                ),
+            );
+            true
+        }
+    };
+
+    if has_changes {
+        if let Ok(mut card) = storage::load_card(card_name) {
+            card.description.push_str(&format!(
+                "\n\n[worker note: changes are in jj workspace '{}' at {} — review, \
+                 merge/squash them, then run `jj workspace forget {}`]",
+                worker_name,
+                workspace_path.display(),
+                worker_name
+            ));
+            card.updated_at = Utc::now();
+            let _ = storage::save_card(&card);
+        }
+        log(
+            worker_name,
+            &format!(
+                "workspace '{}' has changes, left for review at {}",
+                worker_name,
+                workspace_path.display()
+            ),
+        );
+    } else {
+        match forget_workspace(repo_root, worker_name, workspace_path) {
+            Ok(()) => log(
+                worker_name,
+                &format!("workspace '{}' had no changes, forgotten", worker_name),
+            ),
+            Err(e) => log(
+                worker_name,
+                &format!("failed to forget empty workspace '{}': {}", worker_name, e),
+            ),
+        }
+    }
 }
 
 fn process_card(
@@ -301,6 +452,27 @@ fn process_card(
     system_prompt: &str,
     sigint_count: &AtomicUsize,
 ) -> Result<()> {
+    let repo_root = std::env::current_dir().context("failed to get current directory")?;
+
+    let workspace_path: Option<PathBuf> = if worker.workspace && jj_repo_present() {
+        match create_workspace(&repo_root, worker_name) {
+            Ok(path) => {
+                log(
+                    worker_name,
+                    &format!("created jj workspace at {}", path.display()),
+                );
+                Some(path)
+            }
+            Err(e) => {
+                let msg = format!("failed to create jj workspace: {}", e);
+                log(worker_name, &msg);
+                return finish_card(&card.name, worker, worker_name, "", Some(&msg));
+            }
+        }
+    } else {
+        None
+    };
+
     let mut cmd = Command::new(agent);
     cmd.arg("-p").arg("--system-prompt").arg(system_prompt);
     cmd.arg("--allowed-tools");
@@ -315,7 +487,16 @@ fn process_card(
     if let Some(ref effort) = worker.effort {
         cmd.arg("--effort").arg(effort);
     }
-    cmd.arg(task_prompt(card, worker, worker_name));
+    cmd.arg(task_prompt(
+        card,
+        worker,
+        worker_name,
+        workspace_path.as_deref(),
+        &repo_root,
+    ));
+    if let Some(ref ws) = workspace_path {
+        cmd.current_dir(ws);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -396,7 +577,13 @@ fn process_card(
         worker_name,
         &agent_text,
         failure.as_deref(),
-    )
+    )?;
+
+    if let Some(ws) = workspace_path {
+        reconcile_workspace(&repo_root, &card.name, worker_name, &ws);
+    }
+
+    Ok(())
 }
 
 /// Post-process a card after the agent run: append the agent's output to the
@@ -465,6 +652,7 @@ mod tests {
             effort: None,
             allowed_tools: Vec::new(),
             poll_seconds: None,
+            workspace: false,
         }
     }
 
@@ -559,10 +747,93 @@ mod tests {
     #[test]
     fn test_task_prompt_contains_instructions() {
         let card = Card::new("My Card".into(), "Details".into());
-        let prompt = task_prompt(&card, &test_worker(), "sparkly-otter-42");
+        let repo_root = PathBuf::from("/repo");
+        let prompt = task_prompt(&card, &test_worker(), "sparkly-otter-42", None, &repo_root);
         assert!(prompt.contains("cardthing edit \"My Card\" --status done"));
         assert!(prompt.contains("cardthing edit \"My Card\" --needs-human"));
         assert!(prompt.contains("sparkly-otter-42"));
         assert!(prompt.contains("Details"));
+        assert!(!prompt.contains("isolated jj workspace"));
+    }
+
+    #[test]
+    fn test_task_prompt_mentions_workspace_and_repo_root_when_isolated() {
+        let card = Card::new("My Card".into(), "Details".into());
+        let repo_root = PathBuf::from("/repo");
+        let workspace = PathBuf::from("/repo-ws-sparkly-otter-42");
+        let prompt = task_prompt(
+            &card,
+            &test_worker(),
+            "sparkly-otter-42",
+            Some(&workspace),
+            &repo_root,
+        );
+        assert!(prompt.contains("/repo-ws-sparkly-otter-42"));
+        assert!(prompt.contains("/repo"));
+        assert!(prompt.contains("main repository directory"));
+    }
+
+    #[test]
+    fn test_workspace_sibling_path_is_named_after_repo_and_worker() {
+        let repo_root = PathBuf::from("/home/mark/code/cardthing");
+        let path = workspace_sibling_path(&repo_root, "sparkly-otter-42");
+        assert_eq!(
+            path,
+            PathBuf::from("/home/mark/code/cardthing-ws-sparkly-otter-42")
+        );
+    }
+
+    #[test]
+    fn test_jj_repo_present_false_outside_jj_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let present = jj_repo_present();
+        std::env::set_current_dir(original).unwrap();
+        assert!(!present, "a scratch tempdir should not look like a jj repo");
+    }
+
+    /// Exercises workspace create / has-changes / forget against a real
+    /// scratch jj repo, skipping quietly if `jj` isn't on PATH in this
+    /// environment.
+    #[test]
+    fn test_jj_workspace_lifecycle() {
+        if Command::new("jj").arg("--version").output().is_err() {
+            eprintln!("skipping: jj not found on PATH");
+            return;
+        }
+
+        let base = tempfile::tempdir().unwrap();
+        let repo_root = base.path().join("repo");
+        fs::create_dir_all(&repo_root).unwrap();
+
+        let init = Command::new("jj")
+            .arg("git")
+            .arg("init")
+            .current_dir(&repo_root)
+            .status()
+            .unwrap();
+        assert!(init.success());
+
+        let path = create_workspace(&repo_root, "test-worker").unwrap();
+        assert!(path.is_dir());
+        assert_eq!(
+            workspace_has_changes(&path).unwrap(),
+            false,
+            "freshly created workspace should have no changes"
+        );
+
+        fs::write(path.join("new-file.txt"), "hello").unwrap();
+        assert_eq!(
+            workspace_has_changes(&path).unwrap(),
+            true,
+            "workspace with a new file should report changes"
+        );
+
+        // A workspace with changes is left in place for human review.
+        assert!(path.is_dir());
+
+        forget_workspace(&repo_root, "test-worker", &path).unwrap();
+        assert!(!path.exists(), "forgetting a workspace should remove it");
     }
 }

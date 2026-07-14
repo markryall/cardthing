@@ -1,7 +1,28 @@
 name = "per-worker jj workspaces"
-status = "todo"
-description = "When multiple workers run concurrently they all edit the same jj working-copy commit, so their changes get squashed together and cannot be reviewed or committed independently. Add opt-in isolation: a 'workspace = true' field on the [[workers]] profile. When set, 'cardthing work' creates a jj workspace before spawning the agent (jj workspace add --name <worker-name> <sibling-path>, e.g. ../<repo>-ws-<worker-name>), runs the agent with that workspace as its cwd, and includes in the task prompt that all cardthing card commands must be run from the main repo directory (absolute path provided) so the live board is updated, while code changes happen in the workspace. After the run, append the workspace path to the card so a human can review, merge/squash, and 'jj workspace forget' it; if the workspace has no changes, forget and remove it automatically. Only activate when a .jj directory exists; otherwise behave as today. Include tests where feasible (workspace creation can be tested against a scratch jj repo)."
+status = "done"
+description = """
+When multiple workers run concurrently they all edit the same jj working-copy commit, so their changes get squashed together and cannot be reviewed or committed independently. Add opt-in isolation: a 'workspace = true' field on the [[workers]] profile. When set, 'cardthing work' creates a jj workspace before spawning the agent (jj workspace add --name <worker-name> <sibling-path>, e.g. ../<repo>-ws-<worker-name>), runs the agent with that workspace as its cwd, and includes in the task prompt that all cardthing card commands must be run from the main repo directory (absolute path provided) so the live board is updated, while code changes happen in the workspace. After the run, append the workspace path to the card so a human can review, merge/squash, and 'jj workspace forget' it; if the workspace has no changes, forget and remove it automatically. Only activate when a .jj directory exists; otherwise behave as today. Include tests where feasible (workspace creation can be tested against a scratch jj repo).
+
+## Agent: jazzy-flamingo-07 (2026-07-14 03:25 UTC)
+
+Card moved to done. Summary of the work:
+
+**Implementation**
+- Added `workspace: bool` (default `false`) to `WorkerProfile` in `src/models/config.rs`, with tests for TOML parsing.
+- In `src/commands/work.rs`:
+  - `jj_repo_present()` gates the feature on a `.jj` directory existing.
+  - `create_workspace()` runs `jj workspace add --name <worker-name> ../<repo>-ws-<worker-name>` from the repo root.
+  - `workspace_has_changes()` checks the workspace's `@` commit for emptiness via `jj log -T 'if(empty, ...)'` (more reliable than parsing `jj diff --stat`, which prints `"0 files changed..."` even with no changes).
+  - `forget_workspace()` runs `jj workspace forget` and removes the directory.
+  - `reconcile_workspace()` runs after the agent finishes: if the workspace has changes, it appends a note with the workspace path to the card for human review; if not, it auto-forgets it.
+  - `process_card()` now creates the workspace (if enabled), sets it as the agent's `cwd`, and on creation failure gracefully finishes the card with a failure note instead of crashing the worker loop.
+  - `task_prompt()` now tells the agent, when isolated, to make code changes in the workspace but run all `cardthing` commands from the main repo's absolute path.
+- Untouched when `workspace` isn't set or there's no `.jj` — identical behavior to before.
+
+**Tests** — all passing (`cargo test`, `cargo build` clean):
+- Unit tests for the new config field, prompt wording, sibling-path naming, and a full create/detect-changes/forget lifecycle against a scratch `jj` repo (skips gracefully if `jj` isn't on `PATH`).
+- Two new end-to-end integration tests in `tests/integration_tests.rs` driving the real `cardthing work` binary against a scratch `jj` repo: one where the agent makes a change (workspace left in place, noted on the card) and one where it doesn't (workspace auto-forgotten and removed)."""
 created_at = "2026-07-14T03:03:54.571021Z"
-updated_at = "2026-07-14T03:06:55.447694Z"
+updated_at = "2026-07-14T03:25:25.939308Z"
 tags = ["dogfood"]
 order = 0

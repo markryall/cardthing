@@ -30,6 +30,7 @@ name = "implement"
 watch = "todo"
 done = "done"
 prompt_file = ".cards/prompts/implement.md"
+workspace = true
 model = "sonnet"
 effort = "medium"
 allowed_tools = [

@@ -36,6 +36,16 @@ pub struct WorkerProfile {
     /// notifications are missed or unavailable. Defaults to 15.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poll_seconds: Option<u64>,
+    /// When true (and a .jj directory is present), 'cardthing work' isolates
+    /// each agent run in its own jj workspace instead of sharing the main
+    /// working-copy commit, so concurrent workers don't squash each other's
+    /// changes together. Defaults to false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub workspace: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +162,29 @@ mod tests {
         "#;
         let worker: WorkerProfile = toml::from_str(toml_str).unwrap();
         assert_eq!(worker.poll_seconds, Some(5));
+    }
+
+    #[test]
+    fn test_worker_profile_workspace_defaults_to_false() {
+        let toml_str = r#"
+            name = "test"
+            watch = "todo"
+            done = "done"
+        "#;
+        let worker: WorkerProfile = toml::from_str(toml_str).unwrap();
+        assert!(!worker.workspace);
+    }
+
+    #[test]
+    fn test_worker_profile_workspace_parses_when_set() {
+        let toml_str = r#"
+            name = "test"
+            watch = "todo"
+            done = "done"
+            workspace = true
+        "#;
+        let worker: WorkerProfile = toml::from_str(toml_str).unwrap();
+        assert!(worker.workspace);
     }
 }
 
