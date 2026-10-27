@@ -339,6 +339,14 @@ cargo test --test integration_tests
 cargo test -- --nocapture
 ```
 
+### Releasing
+
+```bash
+mise run publish 0.1.2
+```
+
+Runs the tests, bumps the version, pushes main, tags it, publishes to crates.io, and updates the formula in [markryall/homebrew-tap](https://github.com/markryall/homebrew-tap) (`TAP_DIR` overrides where the tap checkout lives). Start from an empty working copy on main in both repos.
+
 ### Project Structure
 
 ```
