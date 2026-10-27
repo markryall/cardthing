@@ -14,12 +14,15 @@ pub fn execute(name: String) -> Result<()> {
 
     println!("{}", card.name.bold());
     println!("  Status:  {}", card.status.color(color));
+    println!("  Owner:   {}", card.owner.as_deref().unwrap_or("-"));
     println!(
-        "  Owner:   {}",
-        card.owner.as_deref().unwrap_or("-")
+        "  Created: {}",
+        card.created_at.format("%Y-%m-%d %H:%M UTC")
     );
-    println!("  Created: {}", card.created_at.format("%Y-%m-%d %H:%M UTC"));
-    println!("  Updated: {}", card.updated_at.format("%Y-%m-%d %H:%M UTC"));
+    println!(
+        "  Updated: {}",
+        card.updated_at.format("%Y-%m-%d %H:%M UTC")
+    );
 
     if let Some(ref p) = card.priority {
         let colored_priority = match p.as_str() {

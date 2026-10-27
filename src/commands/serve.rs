@@ -1221,12 +1221,20 @@ fn render_card(card: &Card) -> String {
                 "medium" => "priority-badge priority-medium",
                 _ => "priority-badge priority-low",
             };
-            parts.push(format!(r#"<span class="{}">{}</span>"#, cls, escape_html(p)));
+            parts.push(format!(
+                r#"<span class="{}">{}</span>"#,
+                cls,
+                escape_html(p)
+            ));
         }
         if let Some(due) = card.due_at {
             let today = chrono::Utc::now().date_naive();
             let due_date = due.date_naive();
-            let cls = if due_date < today { "due-badge due-overdue" } else { "due-badge" };
+            let cls = if due_date < today {
+                "due-badge due-overdue"
+            } else {
+                "due-badge"
+            };
             parts.push(format!(
                 r#"<span class="{}">{}</span>"#,
                 cls,
@@ -1295,7 +1303,8 @@ fn render_card(card: &Card) -> String {
         owner = escape_html(card.owner.as_deref().unwrap_or("")),
         tags = escape_html(&card.tags.join(",")),
         due = escape_html(
-            &card.due_at
+            &card
+                .due_at
                 .map(|d| d.date_naive().format("%Y-%m-%d").to_string())
                 .unwrap_or_default()
         ),

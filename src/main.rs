@@ -65,13 +65,9 @@ fn main() {
             ChecklistAction::Remove { index } => commands::checklist::remove(name, index),
         }),
 
-        Some(Commands::Rm { name }) => {
-            require_init().and_then(|_| commands::remove::execute(name))
-        }
+        Some(Commands::Rm { name }) => require_init().and_then(|_| commands::remove::execute(name)),
 
-        Some(Commands::Show { name }) => {
-            require_init().and_then(|_| commands::show::execute(name))
-        }
+        Some(Commands::Show { name }) => require_init().and_then(|_| commands::show::execute(name)),
 
         Some(Commands::List {
             status,

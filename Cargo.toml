@@ -1,9 +1,10 @@
 [package]
 name = "cardthing"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Mark Ryall"]
 description = "A simple CLI tool for managing task cards"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

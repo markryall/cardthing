@@ -13,7 +13,9 @@ pub fn execute(query: String) -> Result<()> {
         .filter(|c| {
             c.name.to_lowercase().contains(&query_lower)
                 || c.description.to_lowercase().contains(&query_lower)
-                || c.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                || c.tags
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&query_lower))
         })
         .collect();
 

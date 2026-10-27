@@ -20,6 +20,12 @@ A simple, fast command-line tool for managing task cards, written in Rust. A spi
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install markryall/tap/cardthing
+```
+
 ### Prerequisites
 
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
@@ -351,7 +357,7 @@ cardthing/
 
 ## License
 
-MIT
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
 
 ## Credits
 

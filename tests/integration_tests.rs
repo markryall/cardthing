@@ -358,11 +358,16 @@ fn test_worker_flags_needs_human_when_agent_does_not_move_card() {
 
         let card = storage::load_card("stuck card").unwrap();
         assert_eq!(card.status, "todo", "card must stay in its column");
-        assert!(card.needs_human, "card must be flagged for human intervention");
+        assert!(
+            card.needs_human,
+            "card must be flagged for human intervention"
+        );
         assert!(!card.agent, "agent indicator must be cleared");
         assert_eq!(card.owner, None, "claim must be released");
         assert!(card.description.contains("I have questions"));
-        assert!(card.description.contains("neither completed the card nor asked for help"));
+        assert!(card
+            .description
+            .contains("neither completed the card nor asked for help"));
     });
 }
 
@@ -451,7 +456,10 @@ fn init_jj_repo() {
 /// Pull the generated worker instance name (e.g. "sparkly-otter-42") back out
 /// of the "## Agent: <name> (...)" section the worker appends to a card.
 fn worker_name_from_description(desc: &str) -> String {
-    let after = desc.split("## Agent: ").nth(1).expect("agent section present");
+    let after = desc
+        .split("## Agent: ")
+        .nth(1)
+        .expect("agent section present");
     after.split(" (").next().unwrap().trim().to_string()
 }
 
@@ -480,7 +488,10 @@ fn test_worker_leaves_workspace_for_review_when_it_has_changes() {
     with_temp_cards_dir(|| {
         init_jj_repo();
         setup_workspace_worker_project();
-        let card = Card::new("workspace card".to_string(), "please do the thing".to_string());
+        let card = Card::new(
+            "workspace card".to_string(),
+            "please do the thing".to_string(),
+        );
         storage::save_card(&card).unwrap();
 
         let repo_root = env::current_dir().unwrap();
@@ -525,7 +536,10 @@ fn test_worker_auto_forgets_empty_workspace() {
     with_temp_cards_dir(|| {
         init_jj_repo();
         setup_workspace_worker_project();
-        let card = Card::new("empty workspace card".to_string(), "please do the thing".to_string());
+        let card = Card::new(
+            "empty workspace card".to_string(),
+            "please do the thing".to_string(),
+        );
         storage::save_card(&card).unwrap();
 
         let repo_root = env::current_dir().unwrap();

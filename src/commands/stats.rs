@@ -23,7 +23,10 @@ pub fn execute() -> Result<()> {
         if let Some(ref p) = card.priority {
             *by_priority.entry(p.clone()).or_insert(0) += 1;
         }
-        let owner = card.owner.clone().unwrap_or_else(|| "unassigned".to_string());
+        let owner = card
+            .owner
+            .clone()
+            .unwrap_or_else(|| "unassigned".to_string());
         *by_owner.entry(owner).or_insert(0) += 1;
     }
 

@@ -129,7 +129,15 @@ fn handle_add(args: &[&str]) -> Result<()> {
         None
     };
 
-    commands::add::execute(name, description, "todo".to_string(), None, vec![], None, None)
+    commands::add::execute(
+        name,
+        description,
+        "todo".to_string(),
+        None,
+        vec![],
+        None,
+        None,
+    )
 }
 
 fn handle_list(args: &[&str]) -> Result<()> {
@@ -214,11 +222,48 @@ fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
     let value = args[1..].join(" ");
 
     match field {
-        "status" => commands::edit::execute(card_name, None, Some(value), None, false, vec![], vec![], None, false, None, false, false),
-        "owner" => commands::edit::execute(card_name, None, None, Some(value), false, vec![], vec![], None, false, None, false, false),
-        "description" | "desc" => {
-            commands::edit::execute(card_name, Some(value), None, None, false, vec![], vec![], None, false, None, false, false)
-        }
+        "status" => commands::edit::execute(
+            card_name,
+            None,
+            Some(value),
+            None,
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
+        "owner" => commands::edit::execute(
+            card_name,
+            None,
+            None,
+            Some(value),
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
+        "description" | "desc" => commands::edit::execute(
+            card_name,
+            Some(value),
+            None,
+            None,
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
         _ => bail!(
             "Unknown field: '{}'. Valid fields: status, owner, description",
             field
@@ -245,11 +290,48 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
     };
 
     match field {
-        "status" => commands::edit::execute(card_name, None, Some(value), None, false, vec![], vec![], None, false, None, false, false),
-        "owner" => commands::edit::execute(card_name, None, None, Some(value), false, vec![], vec![], None, false, None, false, false),
-        "description" | "desc" => {
-            commands::edit::execute(card_name, Some(value), None, None, false, vec![], vec![], None, false, None, false, false)
-        }
+        "status" => commands::edit::execute(
+            card_name,
+            None,
+            Some(value),
+            None,
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
+        "owner" => commands::edit::execute(
+            card_name,
+            None,
+            None,
+            Some(value),
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
+        "description" | "desc" => commands::edit::execute(
+            card_name,
+            Some(value),
+            None,
+            None,
+            false,
+            vec![],
+            vec![],
+            None,
+            false,
+            None,
+            false,
+            false,
+        ),
         _ => bail!(
             "Unknown field: '{}'. Valid fields: status, owner, description",
             field

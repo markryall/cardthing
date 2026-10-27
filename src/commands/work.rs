@@ -61,7 +61,10 @@ pub fn execute(
     config.validate_status(&worker.watch)?;
     config.validate_status(&worker.done)?;
     if worker.watch == worker.done {
-        anyhow::bail!("Worker '{}': watch and done statuses must differ", worker.name);
+        anyhow::bail!(
+            "Worker '{}': watch and done statuses must differ",
+            worker.name
+        );
     }
 
     let system_prompt = load_system_prompt(&worker)?;
@@ -648,7 +651,10 @@ fn process_card(
                 }
             }
         }
-        Err(e) => (String::new(), Some(format!("failed to launch agent: {}", e))),
+        Err(e) => (
+            String::new(),
+            Some(format!("failed to launch agent: {}", e)),
+        ),
     };
 
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
@@ -706,7 +712,10 @@ pub fn finish_card(
     let mut card = match storage::load_card(card_name) {
         Ok(c) => c,
         Err(_) => {
-            log(worker_name, &format!("'{}' vanished mid-run, moving on", card_name));
+            log(
+                worker_name,
+                &format!("'{}' vanished mid-run, moving on", card_name),
+            );
             return Ok(());
         }
     };
@@ -798,7 +807,14 @@ mod tests {
     fn test_apply_overrides_prompt_file_clears_prompt() {
         let mut worker = test_worker();
         assert!(worker.prompt.is_some());
-        apply_overrides(&mut worker, None, None, Some("prompt.txt".into()), None, None);
+        apply_overrides(
+            &mut worker,
+            None,
+            None,
+            Some("prompt.txt".into()),
+            None,
+            None,
+        );
         assert_eq!(worker.prompt, None);
         assert_eq!(worker.prompt_file, Some("prompt.txt".into()));
     }
