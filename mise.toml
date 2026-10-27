@@ -1,5 +1,6 @@
 [tools]
 rust = "stable"
+shellcheck = "0.11.0"
 
 [tasks.build]
 description = "Build (debug)"
@@ -23,7 +24,7 @@ run = "cargo fmt"
 
 [tasks.lint]
 description = "Run clippy"
-run = "cargo clippy -- -D warnings"
+run = ["shellcheck scripts/*.sh", "cargo clippy -- -D warnings"]
 
 [tasks.serve]
 description = "Start the web board (default port 3000)"
