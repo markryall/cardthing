@@ -26,6 +26,12 @@ A simple, fast command-line tool for managing task cards, written in Rust. A spi
 brew install markryall/tap/cardthing
 ```
 
+### Cargo
+
+```bash
+cargo install cardthing
+```
+
 ### Prerequisites
 
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
