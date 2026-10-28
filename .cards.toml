@@ -25,6 +25,11 @@ id = "blocked"
 label = "Blocked"
 color = "#ef4444"
 
+[[statuses]]
+id = "wayfinder"
+label = "Wayfinder"
+color = "#a855f7"
+
 [[workers]]
 name = "implement"
 watch = "todo"
