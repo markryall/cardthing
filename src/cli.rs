@@ -39,6 +39,10 @@ pub enum Commands {
         /// Priority (high, medium, low)
         #[arg(long)]
         priority: Option<String>,
+
+        /// Cards that must be done before this one can start (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        blocked_by: Vec<String>,
     },
 
     /// Edit an existing card
@@ -89,6 +93,14 @@ pub enum Commands {
         /// Clear the human-intervention flag
         #[arg(long)]
         clear_needs_human: bool,
+
+        /// Add cards that must be done before this one can start (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        add_blocked_by: Vec<String>,
+
+        /// Remove blocking cards (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        remove_blocked_by: Vec<String>,
     },
 
     /// List all cards
@@ -104,6 +116,11 @@ pub enum Commands {
         /// Filter by tag
         #[arg(short, long)]
         tag: Option<String>,
+
+        /// Only cards that can be picked up now: not done, unowned, not
+        /// needing a human, and not blocked by unfinished cards
+        #[arg(long)]
+        ready: bool,
 
         /// Output format (table, json)
         #[arg(short, long, default_value = "table")]

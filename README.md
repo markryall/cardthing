@@ -115,7 +115,20 @@ cardthing checklist "Fix login bug" add "Reproduce the issue"
 cardthing checklist "Fix login bug" add "Write a failing test"
 cardthing checklist "Fix login bug" toggle 1   # toggle item 1 checked/unchecked
 cardthing checklist "Fix login bug" remove 2   # remove item 2 (1-based index)
+
+# Dependencies: a card is blocked until every card it is blocked by is done
+cardthing add "Write release notes" --blocked-by "Fix login bug,Bump version"
+cardthing edit "Write release notes" --add-blocked-by "Update changelog"
+cardthing edit "Write release notes" --remove-blocked-by "Bump version"
+
+# Cards that can be picked up now: not done, unowned, not needing a human, not blocked
+cardthing list --ready
 ```
+
+Blocked cards are marked with 🔒 and dimmed in `list`, `show` lists each blocker
+and whether it is done, and the web board dims them with a "blocked by" badge.
+Agent workers skip blocked cards. Being blocked is worked out from the blockers'
+statuses and is separate from the `blocked` column.
 
 ### Shell Mode (Interactive REPL)
 

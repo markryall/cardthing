@@ -1,4 +1,5 @@
 use crate::commands::{parse_due_date, validate_priority};
+use crate::dependencies;
 use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::{bail, Result};
@@ -12,6 +13,7 @@ pub fn execute(
     tags: Vec<String>,
     due: Option<String>,
     priority: Option<String>,
+    blocked_by: Vec<String>,
 ) -> Result<()> {
     if storage::card_exists(&name) {
         bail!("Card '{}' already exists", name);
@@ -29,6 +31,16 @@ pub fn execute(
     }
     if let Some(p) = priority {
         card.priority = Some(validate_priority(&p)?);
+    }
+
+    if !blocked_by.is_empty() {
+        let cards = storage::list_cards()?;
+        for blocker in blocked_by {
+            let blocker = dependencies::resolve_blocker(&name, &blocker, &cards)?;
+            if !card.blocked_by.contains(&blocker) {
+                card.blocked_by.push(blocker);
+            }
+        }
     }
 
     card.validate()?;

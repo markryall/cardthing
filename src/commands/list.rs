@@ -1,3 +1,4 @@
+use crate::dependencies;
 use crate::models::{Card, Config};
 use crate::storage;
 use anyhow::Result;
@@ -7,10 +8,12 @@ pub fn execute(
     status_filter: Option<String>,
     owner_filter: Option<String>,
     tag_filter: Option<String>,
+    ready: bool,
     format: String,
 ) -> Result<()> {
     let config = Config::load();
-    let mut cards = storage::list_cards()?;
+    let all_cards = storage::list_cards()?;
+    let mut cards = all_cards.clone();
 
     if let Some(status) = status_filter {
         let status = config.validate_status(&status)?;
@@ -25,30 +28,34 @@ pub fn execute(
         cards.retain(|c| c.tags.contains(&tag));
     }
 
+    if ready {
+        cards.retain(|c| dependencies::is_ready(c, &all_cards));
+    }
+
     cards.sort_by_key(|c| c.created_at);
 
     match format.as_str() {
         "json" => print_json(&cards)?,
-        _ => print_table(&cards, &config)?,
+        _ => print_table(&cards, &all_cards, &config)?,
     }
 
     Ok(())
 }
 
-fn print_table(cards: &[Card], config: &Config) -> Result<()> {
+fn print_table(cards: &[Card], all_cards: &[Card], config: &Config) -> Result<()> {
     if cards.is_empty() {
         println!("No cards found.");
         return Ok(());
     }
 
     println!(
-        "{:<20} {:<12} {:<15} {:<40}",
+        "   {:<20} {:<12} {:<15} {:<40}",
         "NAME".bold(),
         "STATUS".bold(),
         "OWNER".bold(),
         "DESCRIPTION".bold()
     );
-    println!("{}", "=".repeat(90));
+    println!("{}", "=".repeat(93));
 
     for card in cards {
         let color = config
@@ -59,10 +66,20 @@ fn print_table(cards: &[Card], config: &Config) -> Result<()> {
         let owner = card.owner.as_deref().unwrap_or("-");
         let desc = truncate(&card.description, 40);
 
-        println!(
-            "{:<20} {:<12} {:<15} {:<40}",
-            card.name, status_colored, owner, desc
-        );
+        if dependencies::is_blocked(card, all_cards) {
+            println!(
+                "🔒 {:<20} {:<12} {:<15} {:<40}",
+                card.name.dimmed(),
+                status_colored.dimmed(),
+                owner.dimmed(),
+                desc.dimmed()
+            );
+        } else {
+            println!(
+                "   {:<20} {:<12} {:<15} {:<40}",
+                card.name, status_colored, owner, desc
+            );
+        }
     }
 
     println!("\nTotal: {} cards", cards.len());

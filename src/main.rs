@@ -25,8 +25,18 @@ fn main() {
             tags,
             due,
             priority,
+            blocked_by,
         }) => require_init().and_then(|_| {
-            commands::add::execute(name, description, status, owner, tags, due, priority)
+            commands::add::execute(
+                name,
+                description,
+                status,
+                owner,
+                tags,
+                due,
+                priority,
+                blocked_by,
+            )
         }),
 
         Some(Commands::Edit {
@@ -42,6 +52,8 @@ fn main() {
             priority,
             needs_human,
             clear_needs_human,
+            add_blocked_by,
+            remove_blocked_by,
         }) => require_init().and_then(|_| {
             commands::edit::execute(
                 name,
@@ -56,6 +68,8 @@ fn main() {
                 priority,
                 needs_human,
                 clear_needs_human,
+                add_blocked_by,
+                remove_blocked_by,
             )
         }),
 
@@ -73,8 +87,11 @@ fn main() {
             status,
             owner,
             tag,
+            ready,
             format,
-        }) => require_init().and_then(|_| commands::list::execute(status, owner, tag, format)),
+        }) => {
+            require_init().and_then(|_| commands::list::execute(status, owner, tag, ready, format))
+        }
 
         Some(Commands::Find { query }) => {
             require_init().and_then(|_| commands::find::execute(query))

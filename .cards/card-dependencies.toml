@@ -1,0 +1,25 @@
+name = "card dependencies"
+status = "done"
+description = """
+Let a card declare which other cards must be done before it can start, so the board has a real frontier (open, unblocked, unclaimed) instead of a "Blocked by:" line in the description. Wanted for wayfinder maps, and fixes workers claiming cards whose prerequisites are not done yet.
+
+## Behaviour
+
+- New card field `blocked_by = ["card name", ...]` (canonical names of other cards; there is no rename, so names are stable).
+- Blocked is computed, not set: a card is blocked while any blocker has a status other than `done`. It is separate from the `blocked` status column, so nobody has to move cards by hand when a blocker finishes. A blocker card that no longer exists does not block.
+- `cardthing add --blocked-by a,b` and `cardthing edit --add-blocked-by a,b / --remove-blocked-by a,b`. Adding validates that the blocker exists, is not the card itself, and would not create a cycle.
+- `cardthing list --ready`: not done, no owner, not needs_human, no open blockers (the frontier).
+- `cardthing work` skips cards with open blockers, both when choosing and when claiming.
+
+## Blocked cards look different
+
+- CLI `list`: blocked rows are prefixed with a lock and dimmed. `show` prints a "Blocked by" line listing each blocker and whether it is done.
+- Web board: blocked cards are dimmed with a dashed red border and a lock badge naming the open blockers.
+
+## Out of scope
+
+Editing blockers from the web modal or the interactive shell (CLI only for now)."""
+created_at = "2026-10-28T22:04:22.658363Z"
+updated_at = "2026-10-28T22:06:56.077035Z"
+tags = ["dogfood"]
+priority = "medium"

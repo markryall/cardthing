@@ -1,3 +1,4 @@
+use crate::dependencies;
 use crate::models::Config;
 use crate::storage;
 use anyhow::Result;
@@ -47,6 +48,24 @@ pub fn execute(name: String) -> Result<()> {
 
     if !card.tags.is_empty() {
         println!("  Tags:    {}", card.tags.join(", "));
+    }
+
+    if !card.blocked_by.is_empty() {
+        let cards = storage::list_cards()?;
+        let open = dependencies::open_blockers(&card, &cards);
+        let label = if open.is_empty() {
+            "Blocked by:".normal()
+        } else {
+            "🔒 Blocked by:".red().bold()
+        };
+        println!("\n{}", label);
+        for blocker in &card.blocked_by {
+            if open.contains(&blocker.as_str()) {
+                println!("  {} {}", "[ ]".normal(), blocker);
+            } else {
+                println!("  {} {}", "[x]".green(), blocker.dimmed());
+            }
+        }
     }
 
     if !card.description.is_empty() {

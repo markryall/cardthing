@@ -245,6 +245,8 @@ fn test_edit_clear_owner() {
             None,
             false,
             false,
+            vec![],
+            vec![],
         )
         .unwrap();
 
@@ -273,11 +275,100 @@ fn test_edit_clear_owner_takes_precedence_over_owner() {
             None,
             false,
             false,
+            vec![],
+            vec![],
         )
         .unwrap();
 
         let loaded = storage::load_card("Contested Card").unwrap();
         assert_eq!(loaded.owner, None, "clear-owner wins over owner");
+    });
+}
+
+// ── Card dependencies ───────────────────────────────────────────────────────
+
+fn edit_blocked_by(name: &str, add: Vec<String>, remove: Vec<String>) -> anyhow::Result<()> {
+    commands::edit::execute(
+        name.to_string(),
+        None,
+        None,
+        None,
+        false,
+        vec![],
+        vec![],
+        None,
+        false,
+        None,
+        false,
+        false,
+        add,
+        remove,
+    )
+}
+
+#[test]
+fn test_add_with_blocked_by_stores_canonical_names() {
+    with_temp_cards_dir(|| {
+        storage::save_card(&Card::new("Design API".to_string(), String::new())).unwrap();
+        commands::add::execute(
+            "build client".to_string(),
+            None,
+            "todo".to_string(),
+            None,
+            vec![],
+            None,
+            None,
+            vec!["design api".to_string()],
+        )
+        .unwrap();
+
+        let loaded = storage::load_card("build client").unwrap();
+        assert_eq!(loaded.blocked_by, vec!["Design API"]);
+    });
+}
+
+#[test]
+fn test_add_rejects_missing_blocker() {
+    with_temp_cards_dir(|| {
+        let result = commands::add::execute(
+            "orphan".to_string(),
+            None,
+            "todo".to_string(),
+            None,
+            vec![],
+            None,
+            None,
+            vec!["nothing here".to_string()],
+        );
+        assert!(result.is_err());
+        assert!(!storage::card_exists("orphan"), "card must not be created");
+    });
+}
+
+#[test]
+fn test_edit_adds_and_removes_blockers() {
+    with_temp_cards_dir(|| {
+        storage::save_card(&Card::new("a".to_string(), String::new())).unwrap();
+        storage::save_card(&Card::new("b".to_string(), String::new())).unwrap();
+        storage::save_card(&Card::new("c".to_string(), String::new())).unwrap();
+
+        edit_blocked_by("c", vec!["a".to_string(), "b".to_string()], vec![]).unwrap();
+        assert_eq!(storage::load_card("c").unwrap().blocked_by, vec!["a", "b"]);
+
+        edit_blocked_by("c", vec![], vec!["a".to_string()]).unwrap();
+        assert_eq!(storage::load_card("c").unwrap().blocked_by, vec!["b"]);
+    });
+}
+
+#[test]
+fn test_edit_rejects_dependency_cycle() {
+    with_temp_cards_dir(|| {
+        storage::save_card(&Card::new("a".to_string(), String::new())).unwrap();
+        storage::save_card(&Card::new("b".to_string(), String::new())).unwrap();
+        edit_blocked_by("b", vec!["a".to_string()], vec![]).unwrap();
+
+        assert!(edit_blocked_by("a", vec!["b".to_string()], vec![]).is_err());
+        assert!(storage::load_card("a").unwrap().blocked_by.is_empty());
     });
 }
 
@@ -432,6 +523,39 @@ fn test_worker_skips_allocated_and_other_status_cards() {
         let waiting = storage::load_card("waiting on human").unwrap();
         assert_eq!(waiting.status, "todo", "needs_human card must be skipped");
         assert!(waiting.needs_human);
+    });
+}
+
+#[test]
+fn test_worker_skips_cards_with_unfinished_blockers() {
+    with_temp_cards_dir(|| {
+        setup_worker_project();
+        let mut prerequisite = Card::new("prerequisite".to_string(), String::new());
+        prerequisite.status = "inprogress".to_string();
+        storage::save_card(&prerequisite).unwrap();
+
+        let mut blocked = Card::new("blocked card".to_string(), "wait".to_string());
+        blocked.blocked_by = vec!["prerequisite".to_string()];
+        storage::save_card(&blocked).unwrap();
+
+        let mut unblocked = Card::new("unblocked card".to_string(), "go".to_string());
+        unblocked.blocked_by = vec!["finished".to_string()];
+        storage::save_card(&unblocked).unwrap();
+
+        let mut finished = Card::new("finished".to_string(), String::new());
+        finished.status = "done".to_string();
+        storage::save_card(&finished).unwrap();
+
+        let agent = write_fake_agent(&format!(
+            "{} edit \"unblocked card\" --status done\necho ok",
+            env!("CARGO_BIN_EXE_cardthing")
+        ));
+        run_worker(&agent);
+
+        assert_eq!(storage::load_card("unblocked card").unwrap().status, "done");
+        let blocked = storage::load_card("blocked card").unwrap();
+        assert_eq!(blocked.status, "todo", "blocked card must be skipped");
+        assert_eq!(blocked.owner, None);
     });
 }
 

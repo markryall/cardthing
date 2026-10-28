@@ -1,3 +1,4 @@
+use crate::dependencies;
 use crate::models::{Card, Config, WorkerProfile};
 use crate::storage;
 use anyhow::{Context, Result};
@@ -236,9 +237,16 @@ pub fn generate_worker_name() -> String {
 }
 
 fn next_unallocated(watch: &str) -> Result<Option<Card>> {
-    let mut cards: Vec<Card> = storage::list_cards()?
-        .into_iter()
-        .filter(|c| c.status == watch && c.owner.is_none() && !c.needs_human)
+    let all_cards = storage::list_cards()?;
+    let mut cards: Vec<Card> = all_cards
+        .iter()
+        .filter(|c| {
+            c.status == watch
+                && c.owner.is_none()
+                && !c.needs_human
+                && !dependencies::is_blocked(c, &all_cards)
+        })
+        .cloned()
         .collect();
     sort_by_board_order(&mut cards);
     Ok(cards.into_iter().next())
@@ -333,7 +341,11 @@ fn claim(card_name: &str, watch: &str, worker_name: &str) -> Result<Option<Card>
             Ok(c) => c,
             Err(_) => return Ok(None), // vanished between scan and claim
         };
-        if card.status != watch || card.owner.is_some() || card.needs_human {
+        if card.status != watch
+            || card.owner.is_some()
+            || card.needs_human
+            || dependencies::is_blocked(&card, &storage::list_cards()?)
+        {
             return Ok(None); // changed under us
         }
         card.owner = Some(worker_name.to_string());

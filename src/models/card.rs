@@ -33,6 +33,9 @@ pub struct Card {
     /// Human intervention required; agent workers will not pick this card up
     #[serde(default, skip_serializing_if = "is_false")]
     pub needs_human: bool,
+    /// Names of cards that must be done before this one can start
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<String>,
 }
 
 fn is_false(v: &bool) -> bool {
@@ -56,6 +59,7 @@ impl Card {
             priority: None,
             agent: false,
             needs_human: false,
+            blocked_by: Vec::new(),
         }
     }
 

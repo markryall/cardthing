@@ -1,4 +1,5 @@
 use crate::commands::parse_due_date;
+use crate::dependencies;
 use crate::models::{Card, ChecklistItem, Config};
 use crate::storage;
 use anyhow::Result;
@@ -470,7 +471,7 @@ fn render_board(cards: &[Card]) -> String {
                 let bo = b.order.unwrap_or(u32::MAX);
                 ao.cmp(&bo).then_with(|| a.created_at.cmp(&b.created_at))
             });
-            render_column(&col.id, &col.label, &col.color, &col_cards)
+            render_column(&col.id, &col.label, &col.color, &col_cards, cards)
         })
         .collect();
 
@@ -598,6 +599,9 @@ fn render_board(cards: &[Card]) -> String {
   .agent-badge {{ font-size: 0.7rem; color: #93c5fd; background: rgba(59,130,246,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; display: inline-flex; align-items: center; gap: 0.3rem; }}
   .agent-dot {{ width: 0.4rem; height: 0.4rem; border-radius: 999px; background: #3b82f6; animation: agent-pulse 1.2s ease-in-out infinite; }}
   @keyframes agent-pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.25; }} }}
+  .card.blocked-by {{ opacity: 0.55; border: 1px dashed #ef4444; }}
+  .card.blocked-by:hover {{ opacity: 0.85; }}
+  .blocked-badge {{ font-size: 0.7rem; color: #f87171; background: rgba(239,68,68,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
   .needs-human-badge {{ font-size: 0.7rem; color: #fbbf24; background: rgba(245,158,11,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
   .field-check {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; }}
   .field-check input[type=checkbox] {{ cursor: pointer; accent-color: #f59e0b; }}
@@ -1154,11 +1158,17 @@ fn render_board(cards: &[Card]) -> String {
     )
 }
 
-fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> String {
+fn render_column(
+    status_id: &str,
+    label: &str,
+    color: &str,
+    cards: &[&Card],
+    all_cards: &[Card],
+) -> String {
     let cards_html: String = if cards.is_empty() {
         "<div class=\"empty\">No cards</div>".to_string()
     } else {
-        cards.iter().map(|c| render_card(c)).collect()
+        cards.iter().map(|c| render_card(c, all_cards)).collect()
     };
 
     let label_json = serde_json::to_string(label).unwrap_or_default();
@@ -1194,7 +1204,9 @@ fn render_column(status_id: &str, label: &str, color: &str, cards: &[&Card]) -> 
     )
 }
 
-fn render_card(card: &Card) -> String {
+fn render_card(card: &Card, all_cards: &[Card]) -> String {
+    let open_blockers = dependencies::open_blockers(card, all_cards);
+
     let desc_display = if card.description.is_empty() {
         String::new()
     } else {
@@ -1206,6 +1218,12 @@ fn render_card(card: &Card) -> String {
 
     let meta_html: String = {
         let mut parts = Vec::new();
+        if !open_blockers.is_empty() {
+            parts.push(format!(
+                r#"<span class="blocked-badge">🔒 blocked by {}</span>"#,
+                escape_html(&open_blockers.join(", "))
+            ));
+        }
         if card.agent {
             parts.push(
                 r#"<span class="agent-badge"><span class="agent-dot"></span>agent</span>"#
@@ -1275,9 +1293,14 @@ fn render_card(card: &Card) -> String {
         .join(",");
 
     let extra_classes = format!(
-        "{}{}",
+        "{}{}{}",
         if card.agent { " agent-working" } else { "" },
-        if card.needs_human { " needs-human" } else { "" }
+        if card.needs_human { " needs-human" } else { "" },
+        if open_blockers.is_empty() {
+            ""
+        } else {
+            " blocked-by"
+        }
     );
 
     format!(

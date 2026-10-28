@@ -137,6 +137,7 @@ fn handle_add(args: &[&str]) -> Result<()> {
         vec![],
         None,
         None,
+        vec![],
     )
 }
 
@@ -169,7 +170,7 @@ fn handle_list(args: &[&str]) -> Result<()> {
         }
     }
 
-    commands::list::execute(status, owner, None, "table".to_string())
+    commands::list::execute(status, owner, None, false, "table".to_string())
 }
 
 fn handle_cd(args: &[&str], current_card: &mut Option<String>) -> Result<()> {
@@ -235,6 +236,8 @@ fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         "owner" => commands::edit::execute(
             card_name,
@@ -249,6 +252,8 @@ fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         "description" | "desc" => commands::edit::execute(
             card_name,
@@ -263,6 +268,8 @@ fn handle_set(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         _ => bail!(
             "Unknown field: '{}'. Valid fields: status, owner, description",
@@ -303,6 +310,8 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         "owner" => commands::edit::execute(
             card_name,
@@ -317,6 +326,8 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         "description" | "desc" => commands::edit::execute(
             card_name,
@@ -331,6 +342,8 @@ fn handle_edit(args: &[&str], current_card: &Option<String>) -> Result<()> {
             None,
             false,
             false,
+            vec![],
+            vec![],
         ),
         _ => bail!(
             "Unknown field: '{}'. Valid fields: status, owner, description",

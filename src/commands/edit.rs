@@ -1,4 +1,5 @@
 use crate::commands::{parse_due_date, validate_priority};
+use crate::dependencies;
 use crate::models::Config;
 use crate::storage;
 use anyhow::{bail, Result};
@@ -18,6 +19,8 @@ pub fn execute(
     priority: Option<String>,
     needs_human: bool,
     clear_needs_human: bool,
+    add_blocked_by: Vec<String>,
+    remove_blocked_by: Vec<String>,
 ) -> Result<()> {
     let mut card = storage::load_card(&name)?;
     let mut changes = Vec::new();
@@ -84,6 +87,29 @@ pub fn execute(
     } else if clear_needs_human {
         card.needs_human = false;
         changes.push("cleared human-intervention flag".to_string());
+    }
+
+    if !add_blocked_by.is_empty() {
+        let cards = storage::list_cards()?;
+        for blocker in add_blocked_by {
+            let blocker = dependencies::resolve_blocker(&card.name, &blocker, &cards)?;
+            if !card.blocked_by.contains(&blocker) {
+                changes.push(format!("blocked by '{}'", blocker));
+                card.blocked_by.push(blocker);
+            }
+        }
+    }
+
+    for blocker in &remove_blocked_by {
+        let slug = storage::sanitize_filename(blocker);
+        if let Some(pos) = card
+            .blocked_by
+            .iter()
+            .position(|b| storage::sanitize_filename(b) == slug)
+        {
+            let removed = card.blocked_by.remove(pos);
+            changes.push(format!("no longer blocked by '{}'", removed));
+        }
     }
 
     if changes.is_empty() {
