@@ -123,7 +123,19 @@ cardthing edit "Write release notes" --remove-blocked-by "Bump version"
 
 # Cards that can be picked up now: not done, unowned, not needing a human, not blocked
 cardthing list --ready
+
+# Claim a card atomically: fails if someone else already owns it
+cardthing edit "Write release notes" --claim alice
+
+# Append to a description, optionally at the end of a markdown section
+# (created as '## <heading>' if missing); '-' reads the text from stdin
+cardthing append "Write release notes" "- mention the new board toggle" --section "Notes"
+echo "Decided: ship Friday." | cardthing append "Write release notes" - --section Answer
 ```
+
+`--claim` and `append` take a per-card lock (shared with agent workers), so
+parallel sessions can claim and append to the same cards without overwriting
+each other.
 
 Blocked cards are marked with 🔒 and dimmed in `list`, `show` lists each blocker
 and whether it is done, and the web board dims them with a "blocked by" badge.

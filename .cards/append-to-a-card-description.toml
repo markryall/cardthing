@@ -1,0 +1,19 @@
+name = "Append to a card description"
+status = "done"
+owner = "claude"
+description = """
+Wayfinder resolutions append to two cards: the ticket (## Answer) and the map card (## Decisions so far / ## Out of scope). Today that means show, then 'edit --description' with the whole text, so concurrent sessions overwrite each other's additions to the shared map card.
+
+Add 'cardthing append <card> <text> [--section <heading>]':
+- Without --section, appends to the end of the description (blank line separated).
+- With --section, inserts at the end of that markdown section (before the next heading of the same or higher level), creating '## <heading>' at the end if it doesn't exist. Heading match is case-insensitive.
+- <text> of '-' reads stdin, for multi-line text.
+- Read-modify-write under the per-card lock from 'Atomic claim with edit --claim'.
+- Update docs/agents/issue-tracker.md (Resolve, Out of scope, comments) to use it."""
+created_at = "2026-11-01T21:03:31.211134Z"
+updated_at = "2026-11-01T21:07:16.836597Z"
+tags = [
+    "cli",
+    "wayfinder",
+]
+blocked_by = ["Atomic claim with edit --claim"]

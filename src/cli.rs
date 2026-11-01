@@ -46,6 +46,22 @@ pub enum Commands {
     },
 
     /// Edit an existing card
+    /// Append text to a card's description, optionally at the end of a
+    /// markdown section (concurrency-safe, unlike rewriting with edit -d)
+    Append {
+        /// Name of the card
+        name: String,
+
+        /// Text to append; '-' reads stdin. May start with '-' (a list item)
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+
+        /// Heading of the section to append to, e.g. "Decisions so far";
+        /// created as '## <heading>' at the end if missing
+        #[arg(long)]
+        section: Option<String>,
+    },
+
     Edit {
         /// Name of the card to edit
         name: String,
@@ -65,6 +81,10 @@ pub enum Commands {
         /// Clear the owner (e.g. to release a crashed worker's claim)
         #[arg(long)]
         clear_owner: bool,
+
+        /// Take ownership atomically: fails if someone else already owns the card
+        #[arg(long, value_name = "WHO", conflicts_with_all = ["owner", "clear_owner"])]
+        claim: Option<String>,
 
         /// Add tags (comma-separated)
         #[arg(long, value_delimiter = ',')]

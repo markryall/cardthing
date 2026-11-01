@@ -1,18 +1,19 @@
 use crate::dependencies;
 use crate::models::{Card, Config, WorkerProfile};
 use crate::storage;
+use crate::storage::lock::{self, steal_stale as steal_stale_lock, try_acquire as acquire_lock};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use colored::Colorize;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const POLL_SECONDS: u64 = 15;
 
@@ -264,61 +265,11 @@ fn sort_by_board_order(cards: &mut [Card]) {
 }
 
 fn claims_dir() -> PathBuf {
-    storage::get_cards_path().join(".claims")
+    lock::lock_dir()
 }
 
 fn logs_dir() -> PathBuf {
     storage::get_cards_path().join(".logs")
-}
-
-/// A lock file untouched for this long is assumed to be left over from a
-/// worker that crashed mid-claim rather than one still legitimately held.
-const STALE_LOCK_SECS: u64 = 60;
-
-/// Try to exclusively create `lock_path`, stamping it with the current unix
-/// time so staleness can later be judged from its contents. Returns whether
-/// the lock was acquired.
-fn acquire_lock(lock_path: &Path) -> bool {
-    // O_EXCL: creation fails if another worker holds the lock
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(lock_path)
-    {
-        Ok(mut f) => {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let _ = f.write_all(now.to_string().as_bytes());
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-/// If `lock_path` holds a timestamp older than [`STALE_LOCK_SECS`], treat it
-/// as left over from a crashed worker and delete it. Returns true when the
-/// caller should retry acquiring the lock (either it was stolen, or it had
-/// already vanished on its own).
-fn steal_stale_lock(lock_path: &Path) -> bool {
-    let contents = match fs::read_to_string(lock_path) {
-        Ok(c) => c,
-        Err(_) => return true, // vanished already; a retry will just recreate it
-    };
-    let created: u64 = match contents.trim().parse() {
-        Ok(v) => v,
-        Err(_) => return false, // unreadable timestamp; leave a lock we don't understand alone
-    };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    if now.saturating_sub(created) >= STALE_LOCK_SECS {
-        fs::remove_file(lock_path).is_ok()
-    } else {
-        false
-    }
 }
 
 /// Attempt to claim a card by setting its owner, guarded by an exclusive lock
@@ -326,7 +277,7 @@ fn steal_stale_lock(lock_path: &Path) -> bool {
 /// card, or None if someone else got there first.
 fn claim(card_name: &str, watch: &str, worker_name: &str) -> Result<Option<Card>> {
     fs::create_dir_all(claims_dir())?;
-    let lock_path = claims_dir().join(format!("{}.lock", storage::sanitize_filename(card_name)));
+    let lock_path = lock::lock_path(&claims_dir(), card_name);
 
     if !acquire_lock(&lock_path) {
         // Someone else holds the lock. If it's stale -- left over from a
@@ -768,6 +719,17 @@ pub fn finish_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::lock::STALE_LOCK_SECS;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// The working directory is process-wide, so tests that change it must
+    /// not overlap, or one restores it under the other and writes land in
+    /// the real repo's .cards.
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn cwd_guard() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn test_worker() -> WorkerProfile {
         WorkerProfile {
@@ -912,6 +874,7 @@ mod tests {
 
     #[test]
     fn test_claim_recovers_from_crashed_worker_lock() {
+        let _cwd = cwd_guard();
         let dir = tempfile::tempdir().unwrap();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
@@ -1045,6 +1008,7 @@ mod tests {
 
     #[test]
     fn test_jj_repo_present_false_outside_jj_repo() {
+        let _cwd = cwd_guard();
         let dir = tempfile::tempdir().unwrap();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();

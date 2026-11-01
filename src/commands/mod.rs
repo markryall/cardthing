@@ -1,4 +1,5 @@
 pub mod add;
+pub mod append;
 pub mod checklist;
 pub mod edit;
 pub mod find;

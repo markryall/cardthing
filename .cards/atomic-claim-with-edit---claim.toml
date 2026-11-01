@@ -1,0 +1,18 @@
+name = "Atomic claim with edit --claim"
+status = "done"
+owner = "claude"
+description = """
+'cardthing edit --owner' silently overwrites an existing owner, so two wayfinder sessions taking the frontier at the same time can both claim the same ticket.
+
+Add 'cardthing edit <card> --claim <who>':
+- Holds the same per-card lock file workers use (.cards/.claims/<slug>.lock) while it re-reads and writes the card, so it is atomic against workers and other sessions.
+- Fails (non-zero exit, names the current owner) if the card is already owned by someone else; succeeds as a no-op if <who> already owns it.
+- Conflicts with --owner / --clear-owner.
+- Move the lock helpers out of work.rs into storage so every writer shares them; plain 'edit' takes the lock too.
+- Update docs/agents/issue-tracker.md's Claim step to use --claim."""
+created_at = "2026-11-01T21:03:31.206120Z"
+updated_at = "2026-11-01T21:07:16.831673Z"
+tags = [
+    "cli",
+    "wayfinder",
+]

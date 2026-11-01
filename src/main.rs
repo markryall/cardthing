@@ -45,6 +45,7 @@ fn main() {
             status,
             owner,
             clear_owner,
+            claim,
             add_tags,
             remove_tags,
             due,
@@ -57,21 +58,30 @@ fn main() {
         }) => require_init().and_then(|_| {
             commands::edit::execute(
                 name,
-                description,
-                status,
-                owner,
-                clear_owner,
-                add_tags,
-                remove_tags,
-                due,
-                clear_due,
-                priority,
-                needs_human,
-                clear_needs_human,
-                add_blocked_by,
-                remove_blocked_by,
+                commands::edit::EditArgs {
+                    description,
+                    status,
+                    owner,
+                    clear_owner,
+                    claim,
+                    add_tags,
+                    remove_tags,
+                    due,
+                    clear_due,
+                    priority,
+                    needs_human,
+                    clear_needs_human,
+                    add_blocked_by,
+                    remove_blocked_by,
+                },
             )
         }),
+
+        Some(Commands::Append {
+            name,
+            text,
+            section,
+        }) => require_init().and_then(|_| commands::append::execute(name, text, section)),
 
         Some(Commands::Checklist { name, action }) => require_init().and_then(|_| match action {
             ChecklistAction::Add { text } => commands::checklist::add(name, text),

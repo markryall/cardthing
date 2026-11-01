@@ -2,26 +2,56 @@ use crate::commands::{parse_due_date, validate_priority};
 use crate::dependencies;
 use crate::models::Config;
 use crate::storage;
+use crate::storage::lock;
 use anyhow::{bail, Result};
 use chrono::Utc;
 use colored::Colorize;
 
-pub fn execute(
-    name: String,
-    description: Option<String>,
-    status: Option<String>,
-    owner: Option<String>,
-    clear_owner: bool,
-    add_tags: Vec<String>,
-    remove_tags: Vec<String>,
-    due: Option<String>,
-    clear_due: bool,
-    priority: Option<String>,
-    needs_human: bool,
-    clear_needs_human: bool,
-    add_blocked_by: Vec<String>,
-    remove_blocked_by: Vec<String>,
-) -> Result<()> {
+/// Changes to apply to a card. Everything defaults to "leave unchanged".
+#[derive(Debug, Default)]
+pub struct EditArgs {
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub owner: Option<String>,
+    pub clear_owner: bool,
+    /// Take ownership only if nobody else owns the card (atomic claim)
+    pub claim: Option<String>,
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+    pub due: Option<String>,
+    pub clear_due: bool,
+    pub priority: Option<String>,
+    pub needs_human: bool,
+    pub clear_needs_human: bool,
+    pub add_blocked_by: Vec<String>,
+    pub remove_blocked_by: Vec<String>,
+}
+
+pub fn execute(name: String, args: EditArgs) -> Result<()> {
+    let EditArgs {
+        description,
+        status,
+        owner,
+        clear_owner,
+        claim,
+        add_tags,
+        remove_tags,
+        due,
+        clear_due,
+        priority,
+        needs_human,
+        clear_needs_human,
+        add_blocked_by,
+        remove_blocked_by,
+    } = args;
+
+    if claim.is_some() && (owner.is_some() || clear_owner) {
+        bail!("--claim cannot be combined with --owner or --clear-owner");
+    }
+
+    // Held until the card is saved, so the read-modify-write below can't
+    // interleave with a worker's claim, another edit or an append.
+    let _lock = lock::lock_card(&name)?;
     let mut card = storage::load_card(&name)?;
     let mut changes = Vec::new();
 
@@ -47,6 +77,23 @@ pub fn execute(
         } else {
             card.owner = Some(owner_value.clone());
             changes.push(format!("owner to '{}'", owner_value));
+        }
+    }
+
+    if let Some(who) = claim {
+        let who = who.trim();
+        if who.is_empty() {
+            bail!("--claim needs a name");
+        }
+        match card.owner.as_deref() {
+            Some(current) if current == who => {
+                changes.push(format!("already claimed by '{}'", who))
+            }
+            Some(current) => bail!("Card '{}' is already claimed by '{}'", card.name, current),
+            None => {
+                card.owner = Some(who.to_string());
+                changes.push(format!("claimed by '{}'", who));
+            }
         }
     }
 

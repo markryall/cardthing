@@ -7,11 +7,15 @@ Run `cardthing <command> --help` for the full flags.
 ## Conventions
 
 - One card per issue. The card name is the title; it cannot contain `/` or `\`.
-- The body is the card description. `cardthing edit --description` replaces the
-  whole description, so to append, `cardthing show` it first and pass the full
-  new text back.
-- Comments and answers go at the bottom of the description under a heading
-  (`## Comments`, `## Answer`). There is no separate comment thread.
+- The body is the card description. To add to it, use
+  `cardthing append "<card>" "<text>" [--section "<heading>"]`: it inserts at
+  the end of that section (creating `## <heading>` if missing), or at the end of
+  the description, under a lock, so concurrent sessions never lose each other's
+  text. `<text>` may start with `- `; pass `-` to read multi-line text from
+  stdin. `cardthing edit --description` replaces the whole description; don't
+  use it to add text.
+- Comments and answers go in the description under a heading
+  (`--section Comments`, `--section Answer`). There is no separate comment thread.
 - `todo` is watched by agent workers (`cardthing work`). Never create a card
   there unless an agent should pick it up and implement it.
 
@@ -56,12 +60,15 @@ color = "#a855f7"
 - **Frontier query**: `cardthing list --tag map:<slug> --status wayfinder --ready`
   lists the open, unblocked, unclaimed tickets, oldest first. First in that order
   wins.
-- **Claim**: `cardthing edit "<ticket>" --owner <driving dev>`, the session's
-  first write.
-- **Resolve**: append the answer under `## Answer` in the ticket's description,
-  then `cardthing edit "<ticket>" --status done`, then add a context pointer
-  (`- <ticket name>: <gist>`) to the map card's Decisions so far. Moving the
-  ticket to `done` unblocks the tickets that wait on it.
-- **Out of scope**: move the ticket to `done`, add `## Out of scope` with the
-  reason to its description, and list it under the map's Out of scope, not
-  Decisions so far.
+- **Claim**: `cardthing edit "<ticket>" --claim <driving dev>`, the session's
+  first write. It is atomic and fails if someone else already owns the ticket;
+  if it fails, another session got there first, so re-run the frontier query
+  and take the next ticket.
+- **Resolve**: `cardthing append "<ticket>" - --section Answer` with the answer
+  on stdin, then `cardthing edit "<ticket>" --status done`, then
+  `cardthing append "<map>" "- <ticket name>: <gist>" --section "Decisions so far"`.
+  Moving the ticket to `done` unblocks the tickets that wait on it.
+- **Out of scope**: move the ticket to `done`,
+  `cardthing append "<ticket>" "<reason>" --section "Out of scope"`, and
+  `cardthing append "<map>" "- <ticket name>: <reason>" --section "Out of scope"`
+  (not Decisions so far).

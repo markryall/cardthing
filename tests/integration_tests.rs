@@ -234,19 +234,10 @@ fn test_edit_clear_owner() {
 
         commands::edit::execute(
             "Owned Card".to_string(),
-            None,
-            None,
-            None,
-            true,
-            vec![],
-            vec![],
-            None,
-            false,
-            None,
-            false,
-            false,
-            vec![],
-            vec![],
+            commands::edit::EditArgs {
+                clear_owner: true,
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -264,19 +255,11 @@ fn test_edit_clear_owner_takes_precedence_over_owner() {
 
         commands::edit::execute(
             "Contested Card".to_string(),
-            None,
-            None,
-            Some("someone-else".to_string()),
-            true,
-            vec![],
-            vec![],
-            None,
-            false,
-            None,
-            false,
-            false,
-            vec![],
-            vec![],
+            commands::edit::EditArgs {
+                owner: Some("someone-else".to_string()),
+                clear_owner: true,
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -290,19 +273,11 @@ fn test_edit_clear_owner_takes_precedence_over_owner() {
 fn edit_blocked_by(name: &str, add: Vec<String>, remove: Vec<String>) -> anyhow::Result<()> {
     commands::edit::execute(
         name.to_string(),
-        None,
-        None,
-        None,
-        false,
-        vec![],
-        vec![],
-        None,
-        false,
-        None,
-        false,
-        false,
-        add,
-        remove,
+        commands::edit::EditArgs {
+            add_blocked_by: add,
+            remove_blocked_by: remove,
+            ..Default::default()
+        },
     )
 }
 
