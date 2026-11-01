@@ -595,13 +595,30 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
         title.clone()
     };
     let body_class = if read_only { "time-machine" } else { "" };
-    let header_actions = if read_only {
-        r#"<button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>"#.to_string()
+    let blocked_count = cards
+        .iter()
+        .filter(|c| dependencies::is_blocked(c, cards))
+        .count();
+    let hide_blocked_btn = if blocked_count > 0 {
+        format!(
+            r#"<button class="btn-outline" id="btn-hide-blocked" onclick="toggleHideBlocked()" title="Hide cards waiting on an unfinished card (b)" data-count="{n}">🔒 Hide blocked ({n})</button>"#,
+            n = blocked_count
+        )
     } else {
-        r#"<button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>
+        String::new()
+    };
+    let header_actions = if read_only {
+        format!(
+            r#"{hide_blocked_btn}
+  <button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>"#
+        )
+    } else {
+        format!(
+            r#"{hide_blocked_btn}
+  <button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>
   <button class="btn-outline" onclick="openAddColumn()">+ Column</button>
   <button class="btn-new" onclick="openCreate()">+ New Card</button>"#
-            .to_string()
+        )
     };
     let tm_banner = tm.map(render_tm_banner).unwrap_or_default();
     let tm_sha = tm.map(|t| escape_html(&t.commit.sha)).unwrap_or_default();
@@ -715,6 +732,8 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
   @keyframes agent-pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.25; }} }}
   .card.blocked-by {{ opacity: 0.55; border: 1px dashed #ef4444; }}
   .card.blocked-by:hover {{ opacity: 0.85; }}
+  body.hide-blocked .card.blocked-by {{ display: none; }}
+  #btn-hide-blocked.active {{ color: #fca5a5; border-color: rgba(239,68,68,0.5); }}
   .blocked-badge {{ font-size: 0.7rem; color: #f87171; background: rgba(239,68,68,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
   .needs-human-badge {{ font-size: 0.7rem; color: #fbbf24; background: rgba(245,158,11,0.15); border-radius: 999px; padding: 0.1rem 0.5rem; font-weight: 600; }}
   .field-check {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; }}
@@ -878,6 +897,7 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     <tr><td><kbd>h</kbd> <kbd>l</kbd></td><td>Move focus left / right</td></tr>
     <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Move card left / right</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Deselect / close</td></tr>
+    <tr><td><kbd>b</kbd></td><td>Hide / show blocked cards</td></tr>
     <tr><td><kbd>t</kbd></td><td>Time machine</td></tr>
     <tr><td><kbd>?</kbd></td><td>Toggle this panel</td></tr>
   </table>
@@ -1330,17 +1350,41 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     return Array.from(col.querySelectorAll('.card'));
   }}
 
+  // Cards keyboard navigation can land on (skips blocked cards while hidden)
+  function getVisibleCardsInColumn(col) {{
+    return getCardsInColumn(col).filter(c => c.offsetParent !== null);
+  }}
+
+  // ── Hide blocked cards ───────────────────────────────────────────────────
+  const HIDE_BLOCKED_KEY = 'cardthing.hideBlocked';
+  function applyHideBlocked(hide) {{
+    document.body.classList.toggle('hide-blocked', hide);
+    const btn = document.getElementById('btn-hide-blocked');
+    if (btn) {{
+      btn.classList.toggle('active', hide);
+      btn.textContent = `🔒 ${{hide ? 'Show' : 'Hide'}} blocked (${{btn.dataset.count}})`;
+    }}
+    if (hide && focusedCard && focusedCard.classList.contains('blocked-by')) focusCard(null);
+    updateColumnCounts();
+  }}
+  function toggleHideBlocked() {{
+    const hide = !document.body.classList.contains('hide-blocked');
+    try {{ localStorage.setItem(HIDE_BLOCKED_KEY, hide ? '1' : ''); }} catch (e) {{}}
+    applyHideBlocked(hide);
+  }}
+  try {{ applyHideBlocked(localStorage.getItem(HIDE_BLOCKED_KEY) === '1'); }} catch (e) {{}}
+
   function moveFocus(dir) {{
     const columns = getColumns();
     if (!columns.length) return;
     if (!focusedCard) {{
-      const first = columns[0].querySelector('.card');
+      const first = columns.map(getVisibleCardsInColumn).flat()[0];
       if (first) focusCard(first);
       return;
     }}
     const col = focusedCard.closest('.column');
     const colIdx = columns.indexOf(col);
-    const cards = getCardsInColumn(col);
+    const cards = getVisibleCardsInColumn(col);
     const cardIdx = cards.indexOf(focusedCard);
     if (dir === 'down') {{
       const next = cards[cardIdx + 1];
@@ -1349,11 +1393,11 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
       const prev = cards[cardIdx - 1];
       if (prev) focusCard(prev);
     }} else if (dir === 'left' && colIdx > 0) {{
-      const prevCards = getCardsInColumn(columns[colIdx - 1]);
+      const prevCards = getVisibleCardsInColumn(columns[colIdx - 1]);
       const target = prevCards[Math.min(cardIdx, prevCards.length - 1)];
       if (target) focusCard(target);
     }} else if (dir === 'right' && colIdx < columns.length - 1) {{
-      const nextCards = getCardsInColumn(columns[colIdx + 1]);
+      const nextCards = getVisibleCardsInColumn(columns[colIdx + 1]);
       const target = nextCards[Math.min(cardIdx, nextCards.length - 1)];
       if (target) focusCard(target);
     }}
@@ -1390,7 +1434,11 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
   function updateColumnCounts() {{
     document.querySelectorAll('.column').forEach(col => {{
       const cards = getCardsInColumn(col);
-      col.querySelector('.column-count').textContent = cards.length;
+      const hiding = document.body.classList.contains('hide-blocked');
+      const shown = hiding ? cards.filter(c => !c.classList.contains('blocked-by')).length : cards.length;
+      const countEl = col.querySelector('.column-count');
+      countEl.textContent = shown === cards.length ? cards.length : `${{shown}}/${{cards.length}}`;
+      countEl.title = shown === cards.length ? '' : `${{cards.length - shown}} blocked card(s) hidden`;
       const cardsEl = col.querySelector('.column-cards');
       const empty = cardsEl.querySelector('.empty');
       if (cards.length === 0 && !empty) {{
@@ -1456,6 +1504,7 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
         document.getElementById('btn-help').style.display = '';
         break;
       case 't': e.preventDefault(); openTimeMachine(); break;
+      case 'b': e.preventDefault(); toggleHideBlocked(); break;
       case '?': e.preventDefault(); toggleHelp(); break;
     }}
   }});
