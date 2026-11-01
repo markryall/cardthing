@@ -45,7 +45,6 @@ pub enum Commands {
         blocked_by: Vec<String>,
     },
 
-    /// Edit an existing card
     /// Append text to a card's description, optionally at the end of a
     /// markdown section (concurrency-safe, unlike rewriting with edit -d)
     Append {
@@ -62,6 +61,7 @@ pub enum Commands {
         section: Option<String>,
     },
 
+    /// Edit an existing card
     Edit {
         /// Name of the card to edit
         name: String,
