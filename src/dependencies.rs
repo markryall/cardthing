@@ -55,6 +55,33 @@ pub fn resolve_blocker(card_name: &str, blocker: &str, cards: &[Card]) -> Result
     Ok(blocker_card.name.clone())
 }
 
+/// Replace a card's blocker list with `requested` (e.g. from the web modal).
+/// Names already in `existing` are kept as they are, so a blocker card that has
+/// since been deleted doesn't stop the card being saved; every other name is
+/// checked with [`resolve_blocker`]. Blank and duplicate names are dropped.
+pub fn replace_blockers(
+    card_name: &str,
+    existing: &[String],
+    requested: Vec<String>,
+    cards: &[Card],
+) -> Result<Vec<String>> {
+    let mut result: Vec<String> = Vec::new();
+    for name in requested {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let resolved = match existing.iter().find(|e| same_card(e, name)) {
+            Some(kept) => kept.clone(),
+            None => resolve_blocker(card_name, name, cards)?,
+        };
+        if !result.iter().any(|r| same_card(r, &resolved)) {
+            result.push(resolved);
+        }
+    }
+    Ok(result)
+}
+
 /// Whether `from` transitively depends on `target`.
 fn depends_on(from: &str, target: &str, cards: &[Card]) -> bool {
     let mut stack = vec![from.to_string()];
@@ -106,6 +133,40 @@ mod tests {
         assert!(is_ready(&cards[1], &cards));
         cards[1].owner = Some("x".to_string());
         assert!(!is_ready(&cards[1], &cards));
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_replace_blockers_keeps_existing_and_validates_new() {
+        let cards = vec![
+            card("a", "todo", &[]),
+            card("Big Thing", "todo", &[]),
+            card("c", "todo", &["a", "gone"]),
+        ];
+        // "gone" no longer exists but was already there; "big thing" resolves
+        let got = replace_blockers(
+            "c",
+            &strings(&["a", "gone"]),
+            strings(&["gone", "big thing", " ", "Big Thing"]),
+            &cards,
+        )
+        .unwrap();
+        assert_eq!(got, strings(&["gone", "Big Thing"]));
+        // new unknown name, self and removal-to-empty
+        assert!(replace_blockers("c", &[], strings(&["nope"]), &cards).is_err());
+        assert!(replace_blockers("c", &[], strings(&["c"]), &cards).is_err());
+        assert!(replace_blockers("c", &strings(&["a"]), vec![], &cards)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_replace_blockers_rejects_cycles() {
+        let cards = vec![card("a", "todo", &["b"]), card("b", "todo", &[])];
+        assert!(replace_blockers("b", &[], strings(&["a"]), &cards).is_err());
     }
 
     #[test]

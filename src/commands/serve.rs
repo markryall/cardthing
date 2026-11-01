@@ -248,6 +248,9 @@ struct CardUpdate {
     priority: Option<String>,
     #[serde(default)]
     needs_human: bool,
+    /// Full replacement list of blocker names; omitted means leave unchanged
+    #[serde(default)]
+    blocked_by: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -262,6 +265,9 @@ struct NewCardBody {
     priority: Option<String>,
     #[serde(default)]
     needs_human: bool,
+    /// Full replacement list of blocker names; omitted means leave unchanged
+    #[serde(default)]
+    blocked_by: Option<Vec<String>>,
 }
 
 async fn patch_card_status(
@@ -323,6 +329,11 @@ async fn patch_card(Path(name): Path<String>, Json(body): Json<CardUpdate>) -> J
             .transpose()?;
         card.priority = body.priority.filter(|p| !p.is_empty());
         card.needs_human = body.needs_human;
+        if let Some(requested) = body.blocked_by {
+            let cards = storage::list_cards()?;
+            card.blocked_by =
+                dependencies::replace_blockers(&card.name, &card.blocked_by, requested, &cards)?;
+        }
         card.updated_at = Utc::now();
         storage::save_card(&card)
     })();
@@ -360,6 +371,10 @@ async fn post_card(Json(body): Json<NewCardBody>) -> Json<ApiResponse> {
         card.priority = body.priority.filter(|p| !p.is_empty());
         card.needs_human = body.needs_human;
         card.validate()?;
+        if let Some(requested) = body.blocked_by {
+            let cards = storage::list_cards()?;
+            card.blocked_by = dependencies::replace_blockers(&card.name, &[], requested, &cards)?;
+        }
         storage::save_card(&card)
     })();
     match result {
@@ -570,6 +585,10 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
             .unwrap_or("todo"),
     );
     let title = escape_html(&config.title);
+    let card_name_options: String = cards
+        .iter()
+        .map(|c| format!(r#"<option value="{}">"#, escape_html(&c.name)))
+        .collect();
     let page_title = if read_only {
         format!("🕰 {}", title)
     } else {
@@ -701,6 +720,14 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
   .field-check {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; }}
   .field-check input[type=checkbox] {{ cursor: pointer; accent-color: #f59e0b; }}
   .field-check label {{ font-size: 0.8rem; color: #94a3b8; cursor: pointer; }}
+  /* Blocked-by chips in modal */
+  .dep-chips {{ display: flex; flex-wrap: wrap; gap: 0.375rem; margin-bottom: 0.375rem; }}
+  .dep-chips:empty {{ display: none; }}
+  .dep-chip {{ display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: #fca5a5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); border-radius: 999px; padding: 0.15rem 0.35rem 0.15rem 0.6rem; }}
+  .dep-chip.done {{ color: #6ee7b7; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.35); }}
+  .dep-chip.missing {{ color: #94a3b8; background: transparent; border-style: dashed; border-color: #475569; }}
+  .dep-chip button {{ background: none; border: none; color: inherit; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 0 0.15rem; opacity: 0.7; }}
+  .dep-chip button:hover {{ opacity: 1; }}
   /* Time machine picker */
   .tm-hint {{ font-size: 0.775rem; color: #94a3b8; margin-bottom: 0.75rem; }}
   .tm-list {{ display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: #94a3b8; }}
@@ -793,6 +820,12 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     <div class="field-check">
       <input id="f-needs-human" type="checkbox">
       <label for="f-needs-human">🙋 Needs human intervention (agents will skip this card)</label>
+    </div>
+    <div class="field">
+      <label>Blocked by</label>
+      <div class="dep-chips" id="dep-chips"></div>
+      <input id="f-dep" type="text" list="card-names" placeholder="Card name, Enter to add" autocomplete="off">
+      <datalist id="card-names">{card_name_options}</datalist>
     </div>
     <div class="field">
       <label>Checklist</label>
@@ -921,7 +954,7 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
 
   function lockModal() {{
     document.querySelectorAll('#backdrop input, #backdrop textarea, #backdrop select').forEach(el => el.disabled = true);
-    document.querySelectorAll('#backdrop .cl-del, #backdrop .btn-add-item, #modal-submit').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('#backdrop .cl-del, #backdrop .btn-add-item, #backdrop .dep-chip button, #f-dep, #modal-submit').forEach(el => el.style.display = 'none');
     document.querySelector('#backdrop .btn-ghost').textContent = 'Close';
   }}
 
@@ -1054,6 +1087,63 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
   }});
   }}
 
+  // ── Blocked-by chips ─────────────────────────────────────────────────────
+  // name -> status for every card on the board, to colour chips and resolve names
+  const CARD_STATUSES = new Map(Array.from(document.querySelectorAll('.card')).map(c => [c.dataset.name, c.dataset.status]));
+  const slug = s => s.toLowerCase().replace(/ /g, '-').replace(/[^a-z0-9_-]/g, '_');
+  let modalBlockers = [];
+
+  function canonicalCardName(name) {{
+    for (const n of CARD_STATUSES.keys()) if (slug(n) === slug(name)) return n;
+    return null;
+  }}
+
+  function renderBlockers() {{
+    const box = document.getElementById('dep-chips');
+    box.innerHTML = '';
+    modalBlockers.forEach((name, i) => {{
+      const status = CARD_STATUSES.get(canonicalCardName(name) || '');
+      const chip = document.createElement('span');
+      chip.className = 'dep-chip' + (status === undefined ? ' missing' : status === 'done' ? ' done' : '');
+      chip.title = status === undefined ? 'card no longer exists' : `status: ${{status}}`;
+      chip.textContent = name;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.innerHTML = '&#x2715;';
+      x.title = 'Remove';
+      x.onclick = () => {{ modalBlockers.splice(i, 1); renderBlockers(); }};
+      chip.appendChild(x);
+      box.appendChild(chip);
+    }});
+    if (READ_ONLY) box.querySelectorAll('button').forEach(b => b.style.display = 'none');
+  }}
+
+  function addBlockerFromInput() {{
+    const input = document.getElementById('f-dep');
+    const errorEl = document.getElementById('modal-error');
+    const raw = input.value.trim();
+    if (!raw) return false;
+    const name = canonicalCardName(raw);
+    if (!name) {{ errorEl.textContent = `No card named '${{raw}}'`; return true; }}
+    if (modalMode === 'edit' && slug(name) === slug(editCardName)) {{ errorEl.textContent = 'A card cannot block itself'; return true; }}
+    if (!modalBlockers.some(b => slug(b) === slug(name))) modalBlockers.push(name);
+    errorEl.textContent = '';
+    input.value = '';
+    renderBlockers();
+    return true;
+  }}
+
+  document.getElementById('f-dep').addEventListener('keydown', e => {{
+    if (e.key === 'Enter' && !e.metaKey) {{ e.preventDefault(); addBlockerFromInput(); }}
+    else if (e.key === 'Backspace' && !e.target.value && modalBlockers.length) {{ modalBlockers.pop(); renderBlockers(); }}
+  }});
+  // Picking a suggestion from the datalist fires 'input' with an exact name
+  document.getElementById('f-dep').addEventListener('input', e => {{
+    if (e.inputType === 'insertReplacementText' || e.inputType === undefined) {{
+      if (CARD_STATUSES.has(e.target.value)) addBlockerFromInput();
+    }}
+  }});
+
   // ── Checklist modal helpers ───────────────────────────────────────────────
   function addChecklistRow(text = '', checked = false, afterRow = null) {{
     const container = document.getElementById('cl-items');
@@ -1123,6 +1213,9 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     document.getElementById('f-due').value = '';
     document.getElementById('f-priority').value = '';
     document.getElementById('f-needs-human').checked = false;
+    modalBlockers = [];
+    document.getElementById('f-dep').value = '';
+    renderBlockers();
     document.getElementById('cl-items').innerHTML = '';
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
@@ -1143,6 +1236,9 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     document.getElementById('f-due').value = el.dataset.due || '';
     document.getElementById('f-priority').value = el.dataset.priority || '';
     document.getElementById('f-needs-human').checked = el.dataset.needsHuman === 'true';
+    modalBlockers = JSON.parse(el.dataset.blockedBy || '[]');
+    document.getElementById('f-dep').value = '';
+    renderBlockers();
     document.getElementById('cl-items').innerHTML = '';
     const checklist = JSON.parse(el.dataset.checklist || '[]');
     checklist.forEach(item => addChecklistRow(item.text, item.checked));
@@ -1174,6 +1270,9 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
     const due_at = document.getElementById('f-due').value || null;
     const priority = document.getElementById('f-priority').value || null;
     const needs_human = document.getElementById('f-needs-human').checked;
+    // a name typed but not yet added with Enter still counts
+    if (addBlockerFromInput() && document.getElementById('f-dep').value) return;
+    const blocked_by = modalBlockers;
     const checklist = getChecklistFromModal();
 
     let url, method, body;
@@ -1182,11 +1281,11 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
       if (!name) {{ errorEl.textContent = 'Name is required'; return; }}
       url = '/cards';
       method = 'POST';
-      body = {{ name, description, status, owner, tags, checklist, due_at, priority, needs_human }};
+      body = {{ name, description, status, owner, tags, checklist, due_at, priority, needs_human, blocked_by }};
     }} else {{
       url = `/cards/${{encodeURIComponent(editCardName)}}`;
       method = 'PATCH';
-      body = {{ description, status, owner, tags, checklist, due_at, priority, needs_human }};
+      body = {{ description, status, owner, tags, checklist, due_at, priority, needs_human, blocked_by }};
     }}
 
     const btn = document.getElementById('modal-submit');
@@ -1373,6 +1472,7 @@ fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> St
         read_only = read_only,
         columns = columns_html,
         status_options = status_options,
+        card_name_options = card_name_options,
         default_status = default_status,
     )
 }
@@ -1570,6 +1670,7 @@ fn render_card(card: &Card, all_cards: &[Card]) -> String {
   data-due="{due}"
   data-priority="{priority}"
   data-needs-human="{needs_human}"
+  data-blocked-by="{blocked_by}"
   data-checklist="[{checklist_json}]"
   onclick="openEdit(this)">
   <div class="card-name">{name_display}</div>
@@ -1577,6 +1678,7 @@ fn render_card(card: &Card, all_cards: &[Card]) -> String {
 </div>"#,
         extra_classes = extra_classes,
         needs_human = card.needs_human,
+        blocked_by = escape_html(&serde_json::to_string(&card.blocked_by).unwrap_or_default()),
         name = escape_html(&card.name),
         desc = escape_html(&card.description),
         status = escape_html(&card.status),
