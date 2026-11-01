@@ -1,0 +1,19 @@
+name = "Time machine mode for the web board"
+status = "done"
+owner = "claude"
+description = """
+Deleted cards can't be looked at, and keeping done cards around forever just to preserve them is annoying.
+
+Add a read-only 'time machine' mode to the web board (cardthing serve) that shows the board as it was at any commit touching .cards/ or .cards.toml in the current project.
+
+- Header button opens a picker listing commits that touched .cards (newest first) with short sha, date and subject.
+- Choosing one loads /?at=<sha>: cards and columns are read from that commit (git show), not the working copy.
+- Read-only: no new card/column buttons, no drag and drop, no column edit/delete, card modal opens with disabled fields and no Save, no n/[/] shortcuts, no live reload.
+- Clearly signposted: a distinct (warm/sepia) colour scheme plus a banner with the commit, older/newer navigation and a 'back to present' link.
+- Works in colocated jj repos (uses git under the hood); shows a friendly message if there is no git history."""
+created_at = "2026-11-01T20:30:06.285742Z"
+updated_at = "2026-11-01T20:33:05.069532Z"
+tags = [
+    "web",
+    "history",
+]

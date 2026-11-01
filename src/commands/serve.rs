@@ -1,10 +1,11 @@
 use crate::commands::parse_due_date;
 use crate::dependencies;
+use crate::history::{self, BoardCommit};
 use crate::models::{Card, ChecklistItem, Config};
 use crate::storage;
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html,
@@ -45,6 +46,7 @@ async fn serve(port: u16) -> Result<()> {
     let app = Router::new()
         .route("/", get(board_handler))
         .route("/events", get(sse_handler))
+        .route("/history", get(history_handler))
         .route("/cards", axum::routing::post(post_card))
         .route(
             "/cards/:name/status",
@@ -115,18 +117,89 @@ async fn sse_handler(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-async fn board_handler() -> Html<String> {
-    let html = match storage::list_cards() {
-        Ok(mut cards) => {
-            cards.sort_by_key(|c| c.created_at);
-            render_board(&cards)
-        }
-        Err(e) => format!(
-            "<!DOCTYPE html><html><body><p>Error loading cards: {}</p></body></html>",
-            escape_html(&e.to_string())
-        ),
+#[derive(Deserialize)]
+struct BoardQuery {
+    /// Commit hash to view the board at (time machine mode)
+    at: Option<String>,
+}
+
+/// What the board needs to know when showing a past commit read-only.
+struct TimeMachine {
+    commit: BoardCommit,
+    older: Option<BoardCommit>,
+    newer: Option<BoardCommit>,
+    unreadable: usize,
+}
+
+async fn board_handler(Query(query): Query<BoardQuery>) -> Html<String> {
+    let html = match query.at.as_deref().filter(|s| !s.is_empty()) {
+        None => match storage::list_cards() {
+            Ok(mut cards) => {
+                cards.sort_by_key(|c| c.created_at);
+                render_board(&cards, &Config::load(), None)
+            }
+            Err(e) => error_page(&format!("Error loading cards: {}", e)),
+        },
+        Some(at) => match load_time_machine(at) {
+            Ok((mut cards, config, tm)) => {
+                cards.sort_by_key(|c| c.created_at);
+                render_board(&cards, &config, Some(&tm))
+            }
+            Err(e) => error_page(&format!("Time machine: {:#}", e)),
+        },
     };
     Html(html)
+}
+
+fn load_time_machine(at: &str) -> anyhow::Result<(Vec<Card>, Config, TimeMachine)> {
+    let root = std::path::Path::new(".");
+    let snapshot = history::snapshot_at(root, at)?;
+    let commits = history::board_commits(root).unwrap_or_default();
+    let idx = commits.iter().position(|c| c.sha == snapshot.commit.sha);
+    let (older, newer) = match idx {
+        Some(i) => (
+            commits.get(i + 1).cloned(),
+            i.checked_sub(1).and_then(|j| commits.get(j).cloned()),
+        ),
+        None => (None, None),
+    };
+    let tm = TimeMachine {
+        commit: snapshot.commit,
+        older,
+        newer,
+        unreadable: snapshot.unreadable.len(),
+    };
+    Ok((snapshot.cards, snapshot.config, tm))
+}
+
+fn error_page(msg: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem"><p>{}</p><p><a style="color:#93c5fd" href="/">Back to the board</a></p></body></html>"#,
+        escape_html(msg)
+    )
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    commits: Vec<BoardCommit>,
+}
+
+async fn history_handler() -> Json<HistoryResponse> {
+    match history::board_commits(std::path::Path::new(".")) {
+        Ok(commits) => Json(HistoryResponse {
+            ok: true,
+            error: None,
+            commits,
+        }),
+        Err(e) => Json(HistoryResponse {
+            ok: false,
+            error: Some(format!("No git history available: {:#}", e)),
+            commits: Vec::new(),
+        }),
+    }
 }
 
 // ── API types ─────────────────────────────────────────────────────────────────
@@ -458,8 +531,8 @@ async fn delete_column(
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-fn render_board(cards: &[Card]) -> String {
-    let config = Config::load();
+fn render_board(cards: &[Card], config: &Config, tm: Option<&TimeMachine>) -> String {
+    let read_only = tm.is_some();
 
     let columns_html: String = config
         .statuses
@@ -471,7 +544,9 @@ fn render_board(cards: &[Card]) -> String {
                 let bo = b.order.unwrap_or(u32::MAX);
                 ao.cmp(&bo).then_with(|| a.created_at.cmp(&b.created_at))
             });
-            render_column(&col.id, &col.label, &col.color, &col_cards, cards)
+            render_column(
+                &col.id, &col.label, &col.color, &col_cards, cards, read_only,
+            )
         })
         .collect();
 
@@ -495,6 +570,26 @@ fn render_board(cards: &[Card]) -> String {
             .unwrap_or("todo"),
     );
     let title = escape_html(&config.title);
+    let page_title = if read_only {
+        format!("🕰 {}", title)
+    } else {
+        title.clone()
+    };
+    let body_class = if read_only { "time-machine" } else { "" };
+    let header_actions = if read_only {
+        r#"<button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>"#.to_string()
+    } else {
+        r#"<button class="btn-outline" onclick="openTimeMachine()" title="Time machine (t)">🕰 Time machine</button>
+  <button class="btn-outline" onclick="openAddColumn()">+ Column</button>
+  <button class="btn-new" onclick="openCreate()">+ New Card</button>"#
+            .to_string()
+    };
+    let tm_banner = tm.map(render_tm_banner).unwrap_or_default();
+    let tm_sha = tm.map(|t| escape_html(&t.commit.sha)).unwrap_or_default();
+    let unreadable_note = match tm {
+        Some(t) if t.unreadable > 0 => format!(" · {} unreadable", t.unreadable),
+        _ => String::new(),
+    };
 
     format!(
         r#"<!DOCTYPE html>
@@ -502,7 +597,7 @@ fn render_board(cards: &[Card]) -> String {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
+<title>{page_title}</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }}
@@ -606,14 +701,51 @@ fn render_board(cards: &[Card]) -> String {
   .field-check {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; }}
   .field-check input[type=checkbox] {{ cursor: pointer; accent-color: #f59e0b; }}
   .field-check label {{ font-size: 0.8rem; color: #94a3b8; cursor: pointer; }}
+  /* Time machine picker */
+  .tm-hint {{ font-size: 0.775rem; color: #94a3b8; margin-bottom: 0.75rem; }}
+  .tm-list {{ display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: #94a3b8; }}
+  .tm-item {{ display: flex; gap: 0.625rem; align-items: baseline; padding: 0.4rem 0.5rem; border-radius: 0.375rem; color: #e2e8f0; text-decoration: none; border: 1px solid transparent; }}
+  .tm-item:hover, .tm-item:focus {{ background: #0f172a; border-color: #334155; outline: none; }}
+  .tm-item.current {{ border-color: #f59e0b; }}
+  .tm-sha {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #fbbf24; flex-shrink: 0; }}
+  .tm-date {{ color: #64748b; flex-shrink: 0; font-size: 0.75rem; }}
+  .tm-subject {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  /* Time machine mode: warm sepia palette so it's never mistaken for the live board */
+  .tm-banner {{ display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.625rem 2rem; background: repeating-linear-gradient(135deg, #f59e0b 0 14px, #fbbf24 14px 28px); color: #1c1410; font-size: 0.8rem; font-weight: 600; }}
+  .tm-banner .tm-label {{ text-transform: uppercase; letter-spacing: 0.08em; }}
+  .tm-banner .tm-commit {{ flex: 1; min-width: 12rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .tm-banner code {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; }}
+  .tm-banner a, .tm-banner .tm-disabled {{ color: #1c1410; background: rgba(255,255,255,0.35); border: 1px solid rgba(28,20,16,0.35); border-radius: 0.375rem; padding: 0.2rem 0.6rem; text-decoration: none; white-space: nowrap; }}
+  .tm-banner a:hover {{ background: rgba(255,255,255,0.6); }}
+  .tm-banner .tm-disabled {{ opacity: 0.4; }}
+  .tm-banner a.tm-present {{ background: #1c1410; color: #fbbf24; }}
+  body.time-machine {{ background: #1c1410; color: #ede0d0; }}
+  body.time-machine header {{ border-bottom-color: #3d2c1f; }}
+  body.time-machine header h1 {{ color: #fdf2e3; }}
+  body.time-machine header .count {{ color: #a08670; }}
+  body.time-machine .btn-outline {{ color: #d6b88f; border-color: #5c4330; }}
+  body.time-machine .column {{ background: #2b2018; }}
+  body.time-machine .column-header {{ cursor: default; }}
+  body.time-machine .column-count {{ background: #1c1410; color: #c4a98a; }}
+  body.time-machine .card {{ background: #1c1410; border-color: #3d2c1f; }}
+  body.time-machine .card-name {{ color: #fdf2e3; }}
+  body.time-machine .card-desc {{ color: #c4a98a; }}
+  body.time-machine .owner, body.time-machine .due-badge {{ background: #2b2018; color: #e5cfb3; }}
+  body.time-machine .tag {{ background: #1c1410; border-color: #5c4330; color: #c4a98a; }}
+  body.time-machine .card.focused {{ border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.3); }}
+  body.time-machine .progress-bar {{ background: #3d2c1f; }}
+  body.time-machine .modal, body.time-machine .shortcuts-panel, body.time-machine .btn-help {{ background: #2b2018; border-color: #5c4330; }}
+  body.time-machine .field input[type=text], body.time-machine .field textarea, body.time-machine .field select, body.time-machine .field input[type=date], body.time-machine .cl-row input[type=text] {{ background: #1c1410; border-color: #5c4330; color: #fdf2e3; }}
+  body.time-machine :disabled {{ opacity: 1; cursor: default; }}
+  body.time-machine .tm-item:hover, body.time-machine .tm-item:focus {{ background: #1c1410; border-color: #5c4330; }}
 </style>
 </head>
-<body>
+<body class="{body_class}">
+{tm_banner}
 <header>
   <h1>{title}</h1>
-  <span class="count">{total} cards</span>
-  <button class="btn-outline" onclick="openAddColumn()">+ Column</button>
-  <button class="btn-new" onclick="openCreate()">+ New Card</button>
+  <span class="count">{total} cards{unreadable_note}</span>
+  {header_actions}
 </header>
 <div class="board">
 {columns}
@@ -692,6 +824,16 @@ fn render_board(cards: &[Card]) -> String {
     </div>
   </div>
 </div>
+<div class="backdrop" id="tm-backdrop" onclick="tmBackdropClick(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">🕰 Time machine</span>
+      <button class="modal-close" onclick="closeTimeMachine()">&#x2715;</button>
+    </div>
+    <p class="tm-hint">View the board, read-only, as it was at any commit that touched <code>.cards</code>.</p>
+    <div class="tm-list" id="tm-list">Loading…</div>
+  </div>
+</div>
 <div id="toast" class="toast"></div>
 
 <div class="shortcuts-panel" id="shortcuts-panel">
@@ -703,6 +845,7 @@ fn render_board(cards: &[Card]) -> String {
     <tr><td><kbd>h</kbd> <kbd>l</kbd></td><td>Move focus left / right</td></tr>
     <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Move card left / right</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Deselect / close</td></tr>
+    <tr><td><kbd>t</kbd></td><td>Time machine</td></tr>
     <tr><td><kbd>?</kbd></td><td>Toggle this panel</td></tr>
   </table>
   <h3 style="margin-top:0.75rem">Checklist (in modal)</h3>
@@ -718,18 +861,69 @@ fn render_board(cards: &[Card]) -> String {
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script>
   const DEFAULT_STATUS = '{default_status}';
+  const READ_ONLY = {read_only};
+  const TM_AT = '{tm_sha}';
   let modalMode = null;
   let editCardName = null;
   let dragging = false;
   let pendingRefresh = false;
 
   // ── Live reload via SSE ──────────────────────────────────────────────────
-  const evtSource = new EventSource('/events');
-  evtSource.addEventListener('refresh', () => {{
-    const anyOpen = document.getElementById('backdrop').classList.contains('open') ||
-                    document.getElementById('col-backdrop').classList.contains('open');
-    if (anyOpen) {{ pendingRefresh = true; }} else {{ location.reload(); }}
-  }});
+  // (not in time machine mode: a past commit never changes)
+  if (!READ_ONLY) {{
+    const evtSource = new EventSource('/events');
+    evtSource.addEventListener('refresh', () => {{
+      const anyOpen = document.getElementById('backdrop').classList.contains('open') ||
+                      document.getElementById('col-backdrop').classList.contains('open');
+      if (anyOpen) {{ pendingRefresh = true; }} else {{ location.reload(); }}
+    }});
+  }}
+
+  // ── Time machine ─────────────────────────────────────────────────────────
+  async function openTimeMachine() {{
+    const list = document.getElementById('tm-list');
+    list.textContent = 'Loading…';
+    document.getElementById('tm-backdrop').classList.add('open');
+    try {{
+      const r = await fetch('/history');
+      const data = await r.json();
+      if (!data.ok) {{ list.textContent = data.error || 'History unavailable'; return; }}
+      list.innerHTML = '';
+      const item = (href, sha, date, subject, current) => {{
+        const a = document.createElement('a');
+        a.className = 'tm-item' + (current ? ' current' : '');
+        a.href = href;
+        a.innerHTML = `<span class="tm-sha">${{escapeAttr(sha)}}</span><span class="tm-date">${{escapeAttr(date)}}</span><span class="tm-subject">${{escapeAttr(subject)}}</span>`;
+        list.appendChild(a);
+        return a;
+      }};
+      const present = item('/', 'now', '', 'Present (live board)', !TM_AT);
+      data.commits.forEach(c => item(`/?at=${{c.sha}}`, c.short, new Date(c.date).toLocaleString(), c.subject, c.sha === TM_AT));
+      if (!data.commits.length) {{
+        const p = document.createElement('div');
+        p.textContent = 'No commits have touched .cards yet.';
+        list.appendChild(p);
+      }}
+      (list.querySelector('.tm-item.current') || present).focus();
+    }} catch (e) {{
+      list.textContent = 'Network error';
+    }}
+  }}
+
+  function closeTimeMachine() {{
+    document.getElementById('tm-backdrop').classList.remove('open');
+    if (pendingRefresh) {{ pendingRefresh = false; location.reload(); }}
+  }}
+
+  function tmBackdropClick(evt) {{
+    if (evt.target === document.getElementById('tm-backdrop')) closeTimeMachine();
+  }}
+
+  function lockModal() {{
+    document.querySelectorAll('#backdrop input, #backdrop textarea, #backdrop select').forEach(el => el.disabled = true);
+    document.querySelectorAll('#backdrop .cl-del, #backdrop .btn-add-item, #modal-submit').forEach(el => el.style.display = 'none');
+    document.querySelector('#backdrop .btn-ghost').textContent = 'Close';
+  }}
 
   // ── Column modal ─────────────────────────────────────────────────────────
   let colModalMode = null;
@@ -801,6 +995,7 @@ fn render_board(cards: &[Card]) -> String {
   }});
 
   // ── Drag and drop ────────────────────────────────────────────────────────
+  if (!READ_ONLY) {{
   new Sortable(document.querySelector('.board'), {{
     animation: 150,
     handle: '.column-header',
@@ -857,6 +1052,7 @@ fn render_board(cards: &[Card]) -> String {
       }}
     }});
   }});
+  }}
 
   // ── Checklist modal helpers ───────────────────────────────────────────────
   function addChecklistRow(text = '', checked = false, afterRow = null) {{
@@ -913,6 +1109,7 @@ fn render_board(cards: &[Card]) -> String {
 
   // ── Modal open/close ─────────────────────────────────────────────────────
   function openCreate() {{
+    if (READ_ONLY) return;
     modalMode = 'create';
     editCardName = null;
     document.getElementById('modal-title').textContent = 'New Card';
@@ -951,6 +1148,7 @@ fn render_board(cards: &[Card]) -> String {
     checklist.forEach(item => addChecklistRow(item.text, item.checked));
     document.getElementById('modal-error').textContent = '';
     document.getElementById('backdrop').classList.add('open');
+    if (READ_ONLY) {{ lockModal(); return; }}
     document.getElementById('f-desc').focus();
   }}
 
@@ -964,6 +1162,7 @@ fn render_board(cards: &[Card]) -> String {
   }}
 
   async function submitModal() {{
+    if (READ_ONLY) return;
     const errorEl = document.getElementById('modal-error');
     errorEl.textContent = '';
 
@@ -1062,7 +1261,7 @@ fn render_board(cards: &[Card]) -> String {
   }}
 
   function moveCardToAdjacentColumn(offset) {{
-    if (!focusedCard) return;
+    if (!focusedCard || READ_ONLY) return;
     const columns = getColumns();
     const col = focusedCard.closest('.column');
     const colIdx = columns.indexOf(col);
@@ -1115,11 +1314,23 @@ fn render_board(cards: &[Card]) -> String {
 
   document.addEventListener('keydown', e => {{
     const inInput = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
-    const modalOpen = document.getElementById('backdrop').classList.contains('open') ||
+    const tmOpen = document.getElementById('tm-backdrop').classList.contains('open');
+    const modalOpen = tmOpen || document.getElementById('backdrop').classList.contains('open') ||
                       document.getElementById('col-backdrop').classList.contains('open');
 
     // Modal shortcuts
     if (modalOpen) {{
+      if (tmOpen) {{
+        if (e.key === 'Escape') {{ e.preventDefault(); closeTimeMachine(); }}
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'j' || e.key === 'k') {{
+          e.preventDefault();
+          const items = Array.from(document.querySelectorAll('#tm-list .tm-item'));
+          const i = items.indexOf(document.activeElement);
+          const next = items[(e.key === 'ArrowDown' || e.key === 'j') ? i + 1 : i - 1];
+          if (next) next.focus();
+        }}
+        return;
+      }}
       if (e.key === 'Escape') {{
         e.preventDefault();
         if (document.getElementById('col-backdrop').classList.contains('open')) {{ closeColModal(); }} else {{ closeModal(); }}
@@ -1145,6 +1356,7 @@ fn render_board(cards: &[Card]) -> String {
         document.getElementById('shortcuts-panel').classList.remove('open');
         document.getElementById('btn-help').style.display = '';
         break;
+      case 't': e.preventDefault(); openTimeMachine(); break;
       case '?': e.preventDefault(); toggleHelp(); break;
     }}
   }});
@@ -1152,9 +1364,45 @@ fn render_board(cards: &[Card]) -> String {
 </body>
 </html>"#,
         total = cards.len(),
+        page_title = page_title,
+        body_class = body_class,
+        tm_banner = tm_banner,
+        tm_sha = tm_sha,
+        unreadable_note = unreadable_note,
+        header_actions = header_actions,
+        read_only = read_only,
         columns = columns_html,
         status_options = status_options,
         default_status = default_status,
+    )
+}
+
+fn render_tm_banner(tm: &TimeMachine) -> String {
+    let nav = |c: &Option<BoardCommit>, label: &str| match c {
+        Some(c) => format!(
+            r#"<a href="/?at={}" title="{}">{}</a>"#,
+            escape_html(&c.sha),
+            escape_html(&format!("{} {}", c.short, c.subject)),
+            label
+        ),
+        None => format!(r#"<span class="tm-disabled">{}</span>"#, label),
+    };
+    let date = chrono::DateTime::parse_from_rfc3339(&tm.commit.date)
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|_| tm.commit.date.clone());
+    format!(
+        r#"<div class="tm-banner" role="status">
+  <span class="tm-label">🕰 Time machine · read-only</span>
+  <span class="tm-commit" title="{sha}">Board at <code>{short}</code> · {date} · {subject}</span>
+  {older}{newer}
+  <a class="tm-present" href="/">Back to present</a>
+</div>"#,
+        sha = escape_html(&tm.commit.sha),
+        short = escape_html(&tm.commit.short),
+        date = escape_html(&date),
+        subject = escape_html(&tm.commit.subject),
+        older = nav(&tm.older, "← Older"),
+        newer = nav(&tm.newer, "Newer →"),
     )
 }
 
@@ -1164,6 +1412,7 @@ fn render_column(
     color: &str,
     cards: &[&Card],
     all_cards: &[Card],
+    read_only: bool,
 ) -> String {
     let cards_html: String = if cards.is_empty() {
         "<div class=\"empty\">No cards</div>".to_string()
@@ -1172,7 +1421,16 @@ fn render_column(
     };
 
     let label_json = serde_json::to_string(label).unwrap_or_default();
-    let del_btn = if cards.is_empty() {
+    let edit_btn = if read_only {
+        String::new()
+    } else {
+        format!(
+            r#"<button class="btn-col-edit" onclick="openEditColumn('{}',{})" title="Rename">&#9998;</button>"#,
+            escape_html(status_id),
+            escape_html(&label_json)
+        )
+    };
+    let del_btn = if cards.is_empty() && !read_only {
         format!(
             r#"<button class="btn-col-del" onclick="deleteColumn('{}')" title="Delete">&#x2715;</button>"#,
             escape_html(status_id)
@@ -1186,8 +1444,7 @@ fn render_column(
     <span class="column-label" style="color:{color}">{label}</span>
     <div class="column-actions">
       <span class="column-count">{count}</span>
-      <button class="btn-col-edit" onclick="openEditColumn('{status}',{label_json})" title="Rename">&#9998;</button>
-      {del_btn}
+      {edit_btn}{del_btn}
     </div>
   </div>
   <div class="column-cards">
@@ -1197,7 +1454,7 @@ fn render_column(
         status = escape_html(status_id),
         color = escape_html(color),
         label = escape_html(label),
-        label_json = label_json,
+        edit_btn = edit_btn,
         del_btn = del_btn,
         count = cards.len(),
         cards = cards_html,

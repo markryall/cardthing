@@ -2,6 +2,7 @@ pub mod cli;
 pub mod commands;
 pub mod dependencies;
 pub mod error;
+pub mod history;
 pub mod models;
 pub mod shell;
 pub mod storage;
