@@ -1,6 +1,6 @@
 [package]
 name = "cardthing"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Mark Ryall"]
 description = "A simple CLI tool for managing task cards"
