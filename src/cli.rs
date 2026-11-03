@@ -181,6 +181,9 @@ pub enum Commands {
     /// Initialise a new cardthing project
     Init,
 
+    /// Regenerate the markdown board snapshot set by `snapshot` in .cards.toml
+    Snapshot,
+
     /// Enter interactive shell mode
     Shell,
 

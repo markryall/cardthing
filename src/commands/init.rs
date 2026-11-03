@@ -6,6 +6,10 @@ const CARDS_DIR: &str = ".cards";
 const CONFIG_FILE: &str = ".cards.toml";
 const DEFAULT_CONFIG: &str = r##"title = "My Board"
 
+# A markdown snapshot of the board, rewritten on every change, so the repo
+# shows where things are at when browsed on GitHub. Remove to turn it off.
+snapshot = ".cards/README.md"
+
 [[statuses]]
 id = "todo"
 label = "Todo"
@@ -62,6 +66,10 @@ pub fn execute() -> Result<()> {
     }
 
     update_gitignore()?;
+
+    if let Some(path) = crate::snapshot::refresh()? {
+        println!("{} Created {}", "✓".green(), path.display());
+    }
 
     println!("Run {} to start the board.", "cardthing serve".bold());
     Ok(())

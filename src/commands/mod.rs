@@ -8,6 +8,7 @@ pub mod list;
 pub mod remove;
 pub mod serve;
 pub mod show;
+pub mod snapshot;
 pub mod stats;
 pub mod work;
 

@@ -307,6 +307,16 @@ checked = false
 
 Files are named using a sanitized version of the card name (lowercase, spaces to hyphens, special characters removed).
 
+### Board snapshot
+
+Set `snapshot` in `.cards.toml` to keep a markdown summary of the board in the repo, so anyone browsing it on GitHub can see where things are at without cloning it:
+
+```toml
+snapshot = ".cards/README.md"
+```
+
+Every card change rewrites it: one section per column with a count, and every card linked to its TOML file with its owner, priority, due date, tags, checklist progress and open blockers. It has no timestamps, so it only changes in a diff when the board does. Done cards are all listed too, which is a hint to clear old ones out. `cardthing init` turns it on; remove the line to turn it off. Run `cardthing snapshot` to regenerate it after editing card files by hand.
+
 ## Examples
 
 ### Typical Workflow (CLI Mode)

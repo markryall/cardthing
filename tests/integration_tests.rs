@@ -730,3 +730,92 @@ fn test_init_does_not_duplicate_existing_gitignore_entries() {
         assert!(gitignore.contains(".cards/.claims/"));
     });
 }
+
+// ── Board snapshot ──────────────────────────────────────────────────────────
+
+const SNAPSHOT: &str = ".cards/README.md";
+
+fn enable_snapshot() {
+    std::fs::write(
+        ".cards.toml",
+        "title = \"Snap\"\nsnapshot = \".cards/README.md\"\n",
+    )
+    .unwrap();
+}
+
+fn read_snapshot() -> String {
+    std::fs::read_to_string(SNAPSHOT).unwrap()
+}
+
+#[test]
+fn test_snapshot_not_written_without_config() {
+    with_temp_cards_dir(|| {
+        std::fs::write(".cards.toml", "title = \"Snap\"\n").unwrap();
+        storage::save_card(&Card::new("quiet".to_string(), String::new())).unwrap();
+        assert!(!std::path::Path::new(SNAPSHOT).exists());
+        assert!(commands::snapshot::execute().is_err());
+    });
+}
+
+#[test]
+fn test_snapshot_follows_card_writes() {
+    with_temp_cards_dir(|| {
+        enable_snapshot();
+
+        commands::add::execute(
+            "first".to_string(),
+            None,
+            "todo".to_string(),
+            None,
+            vec![],
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+        assert!(read_snapshot().contains("## Todo (1)\n\n- [first](first.toml)\n"));
+
+        commands::edit::execute(
+            "first".to_string(),
+            commands::edit::EditArgs {
+                status: Some("done".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(read_snapshot().contains("## Done (1)\n\n- [first](first.toml)\n"));
+
+        commands::append::execute("first".to_string(), "more".to_string(), None).unwrap();
+        commands::checklist::add("first".to_string(), "step".to_string()).unwrap();
+        assert!(read_snapshot().contains("- [first](first.toml) — checklist: 0/1\n"));
+
+        commands::remove::execute("first".to_string()).unwrap();
+        assert!(read_snapshot().contains("## Done (0)\n\n_none_\n"));
+        assert!(!read_snapshot().contains("first"));
+
+        // README.md lives in .cards/ but is never read as a card
+        assert_eq!(storage::list_cards().unwrap().len(), 0);
+    });
+}
+
+#[test]
+fn test_snapshot_command_is_idempotent() {
+    with_temp_cards_dir(|| {
+        enable_snapshot();
+        storage::save_card(&Card::new("a".to_string(), String::new())).unwrap();
+        std::fs::remove_file(SNAPSHOT).unwrap();
+
+        commands::snapshot::execute().unwrap();
+        let first = read_snapshot();
+        commands::snapshot::execute().unwrap();
+        assert_eq!(first, read_snapshot());
+    });
+}
+
+#[test]
+fn test_init_turns_snapshot_on() {
+    with_temp_cards_dir(|| {
+        commands::init::execute().unwrap();
+        assert!(read_snapshot().contains("# My Board\n"));
+    });
+}

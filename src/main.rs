@@ -107,6 +107,8 @@ fn main() {
             require_init().and_then(|_| commands::find::execute(query))
         }
 
+        Some(Commands::Snapshot) => require_init().and_then(|_| commands::snapshot::execute()),
+
         Some(Commands::Stats) => require_init().and_then(|_| commands::stats::execute()),
 
         Some(Commands::Shell) | None => require_init().and_then(|_| shell::run()),

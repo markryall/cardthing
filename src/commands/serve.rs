@@ -482,7 +482,9 @@ async fn put_column_order(Json(body): Json<ColumnOrder>) -> Json<ApiResponse> {
             reordered.push(status);
         }
         config.statuses = reordered;
-        config.save()
+        config.save()?;
+        crate::snapshot::refresh_quietly();
+        Ok(())
     })();
     match result {
         Ok(_) => ApiResponse::ok(),

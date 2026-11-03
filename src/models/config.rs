@@ -54,6 +54,10 @@ pub struct Config {
     pub title: String,
     #[serde(default = "default_statuses")]
     pub statuses: Vec<StatusDef>,
+    /// Where to write a markdown snapshot of the board (e.g. ".cards/README.md")
+    /// for browsing the repo on a forge. Unset: no snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workers: Vec<WorkerProfile>,
 }
@@ -63,6 +67,7 @@ impl Default for Config {
         Config {
             title: default_title(),
             statuses: default_statuses(),
+            snapshot: None,
             workers: Vec::new(),
         }
     }

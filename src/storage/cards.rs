@@ -23,6 +23,7 @@ pub fn save_card(card: &Card) -> Result<()> {
     let path = get_cards_path().join(format!("{}.toml", filename));
     let content = toml::to_string_pretty(card)?;
     fs::write(&path, content).context(format!("Failed to write card: {}", card.name))?;
+    crate::snapshot::refresh_quietly();
     Ok(())
 }
 
@@ -62,6 +63,7 @@ pub fn delete_card(name: &str) -> Result<()> {
     let filename = sanitize_filename(name);
     let path = get_cards_path().join(format!("{}.toml", filename));
     fs::remove_file(&path).context(format!("Failed to delete card: {}", name))?;
+    crate::snapshot::refresh_quietly();
     Ok(())
 }
 

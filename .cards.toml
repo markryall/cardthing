@@ -1,4 +1,5 @@
 title = "My Board"
+snapshot = ".cards/README.md"
 
 [[statuses]]
 id = "todo"
