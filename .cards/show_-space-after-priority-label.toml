@@ -1,0 +1,12 @@
+name = "show: space after Priority label"
+status = "todo"
+description = """
+In `cardthing show`, the priority line prints `Priority:medium` with no space after the colon, so it does not align with the other fields (`Status:  done`, `Tags:    dogfood`).
+
+The line is `src/commands/show.rs:34`: `println!("  Priority:{}", colored_priority);`. Pad it like the others so the values line up in one column. Status, Owner, Created and Updated pad to 9 characters including the colon. `Priority:` is already 9, so a single space after it is enough.
+
+Done when `cardthing show` prints `  Priority: medium` and the value lines up with the other fields."""
+created_at = "2026-11-03T20:49:23.076787Z"
+updated_at = "2026-11-03T20:49:23.076787Z"
+tags = ["dogfood"]
+priority = "low"
