@@ -1,0 +1,37 @@
+name = "init sets up agent skills (tracker doc, CLAUDE.md, wayfinder)"
+status = "todo"
+description = """
+Using the mattpocock skills (/wayfinder, /grill-me, /to-tickets...) with cardthing means hand-copying three things into each repo. Make `cardthing init` (src/commands/init.rs) do it.
+
+## What init should set up
+
+1. **`docs/agents/issue-tracker.md`**: write this repo's `docs/agents/issue-tracker.md` verbatim. Embed it with `include_str!` so the binary ships it. Add `docs/agents/issue-tracker.md` to the `include` list in Cargo.toml, or `cargo publish` won't package it and the crates.io build breaks.
+2. **CLAUDE.md pointer**: create `CLAUDE.md`, or append to it if it exists, with:
+   ```markdown
+   ## Agent skills
+
+   ### Issue tracker
+
+   Issues are cardthing cards in `.cards/`, managed with the `cardthing` CLI. See `docs/agents/issue-tracker.md`.
+   ```
+   Skip it if `CLAUDE.md` already mentions `docs/agents/issue-tracker.md`.
+3. **wayfinder status**: add the `wayfinder` status (label "Wayfinder", color "#a855f7") to `DEFAULT_CONFIG`, after `blocked`. No worker watches it.
+
+## Existing repos
+
+Right now init bails when `.cards/` and `.cards.toml` both exist. Instead, running init again should fill in whatever is missing and report each step, the way `update_gitignore` already works:
+- Never overwrite an existing `docs/agents/issue-tracker.md`; say it was skipped.
+- If `.cards.toml` exists but has no status with `id = "wayfinder"`, append the `[[statuses]]` block to the end of the file (a text append, not a re-serialise, so comments survive).
+- If nothing was missing, say it's already initialised and exit 0.
+
+## Done when
+
+- `cardthing init` in an empty dir creates `.cards/`, `.cards.toml` (including wayfinder), `.gitignore` entries, `docs/agents/issue-tracker.md` and `CLAUDE.md` with the pointer.
+- Running it again changes nothing and doesn't error.
+- In a dir with an older `.cards.toml` (no wayfinder) and a `CLAUDE.md` with no pointer, it adds both and leaves everything else alone.
+- Integration tests in tests/integration_tests.rs cover these three cases.
+- `cargo package --list` includes `docs/agents/issue-tracker.md`."""
+created_at = "2026-11-03T20:52:20.100266Z"
+updated_at = "2026-11-03T20:52:32.042668Z"
+tags = ["dogfood"]
+priority = "medium"
