@@ -48,6 +48,11 @@ color = "#a855f7"
   lowercased, spaces as `-`).
   `cardthing add "<map name>" --status wayfinder --tags wayfinder:map --description "<body>"`.
   Moved to `done` when the way to the destination is clear.
+- **Chart or work?** `/wayfinder <arg>` works through an existing map when
+  `<arg>` names one, and charts a new map otherwise. Check before choosing:
+  `cardthing show "<arg>"` succeeds and lists the `wayfinder:map` tag. Lookup
+  slugs the argument, so the map's name in any case, or its slug, both match.
+  `cardthing list --tag wayfinder:map` lists every map.
 - **Child ticket**: a card in the `wayfinder` column tagged
   `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`) and
   `map:<slug>`, with the question as its description. No other tags.
