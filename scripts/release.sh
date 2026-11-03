@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Release cardthing: bump the version, push main, tag, publish to crates.io,
+# Release cardthing: bump the version, date the changelog's Unreleased
+# section, push main, tag, publish to crates.io,
 # then point the homebrew tap formula at the new tag.
 #
 #   scripts/release.sh 0.1.2
@@ -29,6 +30,11 @@ done
 cargo test --quiet
 
 sed -i '' "s/^version = \"$current\"/version = \"$version\"/" Cargo.toml
+# start the release's changelog section under a fresh, empty Unreleased
+grep -q '^## Unreleased$' CHANGELOG.md || die "CHANGELOG.md has no '## Unreleased' section"
+sed -i '' "s/^## Unreleased\$/## Unreleased\\
+\\
+## $version - $(date +%Y-%m-%d)/" CHANGELOG.md
 cargo check --quiet # refreshes Cargo.lock
 cargo publish --dry-run --allow-dirty --quiet
 
