@@ -7,11 +7,6 @@ label = "Todo"
 color = "#f59e0b"
 
 [[statuses]]
-id = "foo"
-label = "foo"
-color = "#a855f7"
-
-[[statuses]]
 id = "inprogress"
 label = "In Progress"
 color = "#3b82f6"

@@ -7,10 +7,6 @@
 - [show: space after Priority label](show_-space-after-priority-label.toml) — priority: low · tags: `dogfood`
 - [init sets up agent skills (tracker doc, CLAUDE.md, wayfinder)](init-sets-up-agent-skills-_tracker-doc_-claude_md_-wayfinder_.toml) — priority: medium · tags: `dogfood`
 
-## foo (0)
-
-_none_
-
 ## In Progress (0)
 
 _none_
