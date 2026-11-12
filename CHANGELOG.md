@@ -6,6 +6,8 @@ All notable changes to cardthing. The format follows
 
 ## Unreleased
 
+## 0.1.5 - 2026-11-13
+
 ### Added
 
 - Markdown snapshot of the board for browsing a repo on GitHub without cloning
