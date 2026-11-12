@@ -20,6 +20,8 @@ All notable changes to cardthing. The format follows
 
 - The wayfinder tracker doc (`docs/agents/issue-tracker.md`) says how to tell
   charting a new map from working through an existing one.
+- Releases ship prebuilt binaries for macOS and Linux, so
+  `brew install markryall/tap/cardthing` no longer needs Rust.
 
 ## 0.1.4 - 2026-11-02
 
